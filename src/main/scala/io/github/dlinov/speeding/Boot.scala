@@ -1,6 +1,6 @@
-package io.github.dlinov.sf
+package io.github.dlinov.speeding
 
-import io.github.dlinov.sf.dao.{Dao, PostgresDao}
+import io.github.dlinov.speeding.dao.{Dao, PostgresDao}
 
 import scala.io.Source
 

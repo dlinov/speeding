@@ -1,6 +1,6 @@
 enablePlugins(DockerPlugin, JavaAppPackaging)
 
-name := "speeding-fines"
+name := "speeding"
 
 version := "0.1"
 

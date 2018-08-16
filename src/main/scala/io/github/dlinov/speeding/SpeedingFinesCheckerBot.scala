@@ -1,4 +1,4 @@
-package io.github.dlinov.sf
+package io.github.dlinov.speeding
 
 import java.net.HttpCookie
 
@@ -6,8 +6,8 @@ import info.mukel.telegrambot4s.api.declarative.{Commands, Help}
 import info.mukel.telegrambot4s.api.{Extractors, Polling, TelegramBot}
 import info.mukel.telegrambot4s.methods.SendMessage
 import info.mukel.telegrambot4s.models._
-import io.github.dlinov.sf.dao.Dao
-import io.github.dlinov.sf.model.DriverInfo
+import io.github.dlinov.speeding.dao.Dao
+import io.github.dlinov.speeding.model.DriverInfo
 import scalaj.http._
 
 import scala.concurrent.Future

@@ -1,8 +1,8 @@
-package io.github.dlinov.sf.dao
+package io.github.dlinov.speeding.dao
 
 import cats.effect.IO
-import io.github.dlinov.sf.dao.Dao.DaoError
-import io.github.dlinov.sf.model.DriverInfo
+import io.github.dlinov.speeding.dao.Dao.DaoError
+import io.github.dlinov.speeding.model.DriverInfo
 
 trait Dao {
   type DaoResp[+T] = IO[Either[DaoError, _ <: T]]

@@ -1,12 +1,12 @@
-package io.github.dlinov.sf.dao
+package io.github.dlinov.speeding.dao
 
 import cats._
 import cats.effect._
 import cats.implicits._
 import doobie._
 import doobie.implicits._
-import io.github.dlinov.sf.dao.Dao.DaoError
-import io.github.dlinov.sf.model.DriverInfo
+import io.github.dlinov.speeding.dao.Dao.DaoError
+import io.github.dlinov.speeding.model.DriverInfo
 import org.slf4j.LoggerFactory
 
 class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
