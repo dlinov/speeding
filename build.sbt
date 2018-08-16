@@ -1,5 +1,3 @@
-import scalariform.formatter.preferences._
-
 enablePlugins(DockerPlugin, JavaAppPackaging)
 
 name := "speeding-fines"
@@ -11,11 +9,9 @@ scalaVersion := "2.12.6"
 libraryDependencies ++= Seq(
   "ch.qos.logback" % "logback-classic" % "1.2.3",
   "info.mukel" %% "telegrambot4s" % "3.0.15",
+  "org.tpolecat" %% "doobie-core" % "0.5.3",
+  "org.tpolecat" %% "doobie-postgres" % "0.5.3",
   "org.scalaj" %% "scalaj-http" % "2.4.1")
-  //"org.telegram" % "telegramapi" % "66.2",
-  //"org.typelevel" %% "cats-core" % "1.1.0",
-  //"net.debasishg" %% "redisclient" % "3.5",
-  //"com.softwaremill.macwire" %% "macros" % "2.3.1" % "provided")
 
 scalacOptions ++= Seq(
   "-unchecked",
@@ -24,6 +20,7 @@ scalacOptions ++= Seq(
   "-explaintypes",
   "-feature",
   "-language:postfixOps",
+  "-language:higherKinds",
   "-Xlint",
   "-Yno-adapted-args",
   "-Ypartial-unification", // advised by https://github.com/typelevel/cats
@@ -31,10 +28,3 @@ scalacOptions ++= Seq(
   "-Ywarn-unused")
 
 dockerBaseImage := "openjdk:10-jre-slim"
-
-scalariformPreferences := scalariformPreferences.value
-  .setPreference(DanglingCloseParenthesis, Prevent)
-  .setPreference(RewriteArrowSymbols, true) // allows not to force this option in IDE
-  .setPreference(SpacesAroundMultiImports, false)
-  .setPreference(DoubleIndentConstructorArguments, true) // http://docs.scala-lang.org/style/declarations.html#classes
-  .setPreference(NewlineAtEndOfFile, true)
