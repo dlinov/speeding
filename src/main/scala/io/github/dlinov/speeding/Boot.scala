@@ -1,5 +1,7 @@
 package io.github.dlinov.speeding
 
+import java.net.URI
+
 import io.github.dlinov.speeding.dao.{Dao, PostgresDao}
 import org.slf4j.LoggerFactory
 
@@ -19,10 +21,16 @@ object Boot extends App {
   private lazy val token = scala.util.Properties
     .envOrNone("BOT_TOKEN")
     .getOrElse(Source.fromFile("bot.token").getLines().mkString)
-  private val dbUri = scala.util.Properties
+  private final val correctJdbcPrefix = "jdbc:postgresql://"
+  private val dbUri = new URI(scala.util.Properties
     .envOrNone("DATABASE_URL")
-    .getOrElse("postgresql://localhost:5432/speeding")
-  private val dao: Dao = new PostgresDao("jdbc:" + dbUri, "postgres", "password")
+    .getOrElse("postgres://localhost:5432/speeding"))
+  private val (user, password) = {
+    val parts = dbUri.getAuthority.takeWhile(_ != '@').split(':')
+    parts.head → parts.last
+  }
+  private val dbUrl = correctJdbcPrefix + dbUri.getHost + ":" + dbUri.getPort + dbUri.getPath
+  private val dao: Dao = new PostgresDao(dbUrl, user, password)
   private val bot = new SpeedingFinesCheckerBot(token, dao)
   private val botScheduler = bot.system.scheduler
   private implicit val botExecutionContext: ExecutionContext = bot.executionContext

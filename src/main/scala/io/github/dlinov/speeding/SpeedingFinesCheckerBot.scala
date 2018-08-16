@@ -2,7 +2,7 @@ package io.github.dlinov.speeding
 
 import java.net.HttpCookie
 
-import info.mukel.telegrambot4s.api.declarative.{Commands, Help}
+import info.mukel.telegrambot4s.api.declarative.{Commands, Help, ToCommand}
 import info.mukel.telegrambot4s.api.{Extractors, Polling, TelegramBot}
 import info.mukel.telegrambot4s.methods.SendMessage
 import info.mukel.telegrambot4s.models._
@@ -38,7 +38,7 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
   }
 
   onMessage { implicit msg ⇒
-    if (msg.text.forall(!_.startsWith("/"))) {
+    if (msg.text.forall(!_.startsWith(ToCommand.CommandPrefix))) {
       skipBots {
         val parts = Extractors.textTokens(msg).getOrElse(Seq.empty)
         parts match {
