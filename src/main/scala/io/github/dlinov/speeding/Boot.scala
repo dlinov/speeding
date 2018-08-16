@@ -24,13 +24,14 @@ object Boot extends App {
   private final val correctJdbcPrefix = "jdbc:postgresql://"
   private val dbUri = new URI(scala.util.Properties
     .envOrNone("DATABASE_URL")
-    .getOrElse("postgres://localhost:5432/speeding"))
+    .getOrElse("postgres://postgres:password@127.0.0.1:5432/speeding"))
   private val (user, password) = {
     val parts = dbUri.getAuthority.takeWhile(_ != '@').split(':')
     parts.head → parts.last
   }
   private val dbUrl = correctJdbcPrefix + dbUri.getHost + ":" + dbUri.getPort + dbUri.getPath
   private val dao: Dao = new PostgresDao(dbUrl, user, password)
+  dao.createSchemaIfMissing().unsafeRunSync()
   private val bot = new SpeedingFinesCheckerBot(token, dao)
   private val botScheduler = bot.system.scheduler
   private implicit val botExecutionContext: ExecutionContext = bot.executionContext

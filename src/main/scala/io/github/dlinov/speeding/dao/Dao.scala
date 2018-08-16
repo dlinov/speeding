@@ -7,6 +7,8 @@ import io.github.dlinov.speeding.model.DriverInfo
 trait Dao {
   type DaoResp[+T] = IO[Either[DaoError, _ <: T]]
 
+  def createSchemaIfMissing(): IO[Int]
+
   def update(userId: Long, driverInfo: DriverInfo): DaoResp[DriverInfo]
 
   def find(id: Long): DaoResp[Option[DriverInfo]]

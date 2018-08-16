@@ -7,6 +7,8 @@ import io.github.dlinov.speeding.dao.Dao.DaoError
 import io.github.dlinov.speeding.model.DriverInfo
 import org.slf4j.LoggerFactory
 
+import scala.util.Try
+
 class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
 
   private val logger = LoggerFactory.getLogger(classOf[PostgresDao])
@@ -59,5 +61,16 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
       logger.debug(s"Find all results: $all")
       Right(all)
     }).transact(xa)
+  }
+
+  override def createSchemaIfMissing(): IO[Int] = {
+    Try(sql"SELECT COUNT(*) from drivers".query[Int].unique.transact(xa).unsafeRunSync())
+      .fold(
+        _ ⇒ {
+          sql"CREATE TABLE drivers (id bigint NOT NULL, full_name character varying(255), license_series character varying(15), license_number character varying(15), CONSTRAINT drivers_pkey PRIMARY KEY (id)) WITH (OIDS=FALSE);"
+            .update.run.transact(xa)
+        },
+        n ⇒ IO.pure(n)
+      )
   }
 }
