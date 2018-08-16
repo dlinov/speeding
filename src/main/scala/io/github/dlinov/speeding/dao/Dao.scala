@@ -9,6 +9,8 @@ trait Dao {
 
   def update(userId: Long, driverInfo: DriverInfo): DaoResp[DriverInfo]
 
+  def find(id: Long): DaoResp[Option[DriverInfo]]
+
   def findAll: DaoResp[Seq[(Long, DriverInfo)]]
 }
 

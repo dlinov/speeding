@@ -1,8 +1,6 @@
 package io.github.dlinov.speeding.dao
 
-import cats._
 import cats.effect._
-import cats.implicits._
 import doobie._
 import doobie.implicits._
 import io.github.dlinov.speeding.dao.Dao.DaoError
@@ -15,8 +13,8 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
 
   private val xa = {
     Transactor.fromDriverManager[IO](
-      "org.postgresql.Driver", // driver classname
-      dbUri, // connect URL (driver-specific)
+      "org.postgresql.Driver",
+      dbUri,
       user,
       password
     )
@@ -36,19 +34,30 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
         sql"UPDATE drivers SET full_name = $fn, license_series = $ls, license_number = $ln WHERE id = $msgSource"
       }.update.run
     } yield {
-      logger.info(s"Update result: $updResult")
+      logger.debug(s"Update result: $updResult")
       Right(driverInfo): Either[DaoError, DriverInfo]
+    }).transact(xa)
+  }
+
+  override def find(id: Long): DaoResp[Option[DriverInfo]] = {
+    (for {
+      maybeDriver ← sql"SELECT full_name, license_series, license_number FROM drivers WHERE id = $id"
+        .query[DriverInfo]
+        .option
+    } yield {
+      logger.debug(s"Find by id=$id: $maybeDriver")
+      Right(maybeDriver)
     }).transact(xa)
   }
 
   override def findAll: DaoResp[Seq[(Long, DriverInfo)]] = {
     (for {
       all ← sql"SELECT id, full_name, license_series, license_number FROM drivers"
-        .query[(Long, String, String, String)]
+        .query[(Long, DriverInfo)]
         .to[List]
     } yield {
-      logger.info(s"Find all result: $all")
-      Right(all.map(t ⇒ t._1 → DriverInfo(fullName = t._2, licenseSeries = t._3, licenseNumber = t._4)))
+      logger.debug(s"Find all results: $all")
+      Right(all)
     }).transact(xa)
   }
 }

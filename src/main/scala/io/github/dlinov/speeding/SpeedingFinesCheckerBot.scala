@@ -11,61 +11,88 @@ import io.github.dlinov.speeding.model.DriverInfo
 import scalaj.http._
 
 import scala.concurrent.Future
-import scala.concurrent.duration._
 
 class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
   extends TelegramBot with Commands with Polling with Help {
 
   import SpeedingFinesCheckerBot._
 
-  system.scheduler.schedule(20.seconds, 300.seconds, () ⇒ {
+  override def helpBody(): String = Greeting
+
+  onCommandWithHelp('forcecheck)("Force check of speeding fines") { implicit msg ⇒
+    skipBots {
+      dao.find(msg.source).unsafeRunSync()
+        .fold(
+          _ ⇒ reply("There was an error processing your request"),
+          _.fold {
+            reply("There is no saved driver info for you")
+          } { d ⇒
+            checkDriverFines(retrieveCookies, d)
+              .fold {
+                reply("Congratulations! No camera speeding records were found for you.")
+              } {
+                reply(_) // all fines go here
+              }
+          })
+    }
+  }
+
+  onMessage { implicit msg ⇒
+    if (msg.text.forall(!_.startsWith("/"))) {
+      skipBots {
+        val parts = Extractors.textTokens(msg).getOrElse(Seq.empty)
+        parts match {
+          case firstName :: middleName :: lastName :: licenseSeries :: licenseNumber :: Nil ⇒
+            val driverInfo = DriverInfo(
+              fullName = (firstName.trim + " " + middleName.trim + " " + lastName.trim).toUpperCase,
+              licenseSeries = licenseSeries.toUpperCase,
+              licenseNumber = licenseNumber.toUpperCase)
+            dao.update(msg.source, driverInfo).unsafeRunSync()
+            reply("Your data was saved. You will receive updates when any fine is found")
+          case _ ⇒
+            reply("Error: wrong format. Your message must contain 5 words. Use /help to get more info")
+        }
+      }
+    }
+  }
+
+  def performCheckForAllDrivers(): Unit = {
     val allDrivers = dao.findAll.unsafeRunSync()
-    val cookies = MvdPageReq.asString.cookies
-    logger.info(memoryInfo)
-    allDrivers.foreach(_.map(t ⇒ {
-      val (msgSource, driverInfo) = t
-      val resp = speedingReq(driverInfo, cookies).asString
-      if (resp.body.contains("<html>")) {
-        logger.error("Some error: " + resp.body)
-        Future.successful(())
+    val cookies = retrieveCookies
+    allDrivers.foreach(_.foreach {
+      case (chatId, driverInfo) ⇒
+        checkDriverFines(cookies, driverInfo)
+          .foreach(sendMessageTo(chatId, _))
+    })
+  }
+
+  private def sendMessageTo(chatId: Long, text: String): Future[Message] = {
+    request(SendMessage(chatId, text))
+  }
+
+  private def checkDriverFines(
+                                cookies: IndexedSeq[HttpCookie],
+                                driverInfo: DriverInfo): Option[String] = {
+    val resp = speedingReq(driverInfo, cookies).asString
+    if (resp.body.contains("<html>")) {
+      logger.warn("Some error: " + resp.body)
+      None
+    } else {
+      if (resp.body.contains("информация не найдена")) {
+        None
       } else {
         val text = resp.body
           .replace("\"\\u003ch2\\u003e", "")
           .replace("\\u003c/h2\\u003e\"", "")
-        request(
-          SendMessage(
-            msgSource,
-            text
-          )
-        )
+        Some(text)
       }
-    }))
-  })
-
-  onCommand('start) { implicit msg ⇒
-    msg.from.foreach(user ⇒ {
-      if (!user.isBot) {
-        reply(Greeting)
-      } else {
-        logger.info(s"User ${getUserId(user)} is bot, skipping his request")
-      }
-    })
+    }
   }
 
-  onMessage { implicit msg ⇒
+  private def skipBots(action: ⇒ Unit)(implicit msg: Message): Unit = {
     msg.from.foreach(user ⇒ {
       if (!user.isBot) {
-        val parts = Extractors.textTokens(msg).getOrElse(Seq.empty)
-        if (parts.length != 5) {
-          reply("Error: wrong format. Your message should contain 5 words")
-          reply(Greeting)
-        } else {
-          val driverInfo = DriverInfo(
-            fullName = (parts.head.trim + " " + parts(1).trim + " " + parts(2).trim).toUpperCase,
-            licenseSeries = parts(3).toUpperCase,
-            licenseNumber = parts(4).toUpperCase)
-          dao.update(msg.source, driverInfo).unsafeRunSync()
-        }
+        action
       } else {
         logger.info(s"User ${getUserId(user)} is bot, skipping his request")
       }
@@ -81,13 +108,13 @@ object SpeedingFinesCheckerBot {
       |Please send data in the following format:
       |FIRSTNAME MIDDLENAME LASTNAME CAR_ID_SERIES CAR_ID_NUMBER""".stripMargin
 
-  private final val MvdPageReq = Http("http://mvd.gov.by/main.aspx?guid=15791")
+  private final val SessionCookieReq = Http("http://mvd.gov.by/main.aspx?guid=15791")
   private final val SpeedingBaseCheckReq = Http("http://mvd.gov.by/Ajax.asmx/GetExt")
     .method("POST")
     .headers(
       "Host" → "mvd.gov.by",
       "Origin" → "http://mvd.gov.by",
-      "Referer" → MvdPageReq.url,
+      "Referer" → SessionCookieReq.url,
       "Content-Type" → "application/json; charset=UTF-8")
 
   private def speedingReq(driverInfo: DriverInfo, cookies: Seq[HttpCookie]): HttpRequest = {
@@ -100,11 +127,9 @@ object SpeedingFinesCheckerBot {
       .postData(json)
   }
 
-  private def getUserId(user: User): String = user.username.map("@" + _).getOrElse(user.id.toString)
-
-  private def memoryInfo: String = {
-    val rt = Runtime.getRuntime
-    val mb = 1 << 20
-    s"free: ${rt.freeMemory() / mb}\ttotal: ${rt.totalMemory() / mb}\tmax: ${rt.maxMemory() / mb}"
+  private def retrieveCookies: IndexedSeq[HttpCookie] = {
+    SessionCookieReq.asString.cookies
   }
+
+  private def getUserId(user: User): String = user.username.map("@" + _).getOrElse(user.id.toString)
 }
