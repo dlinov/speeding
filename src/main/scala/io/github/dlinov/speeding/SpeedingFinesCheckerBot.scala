@@ -40,9 +40,9 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
   onMessage { implicit msg ⇒
     if (msg.text.forall(!_.startsWith(ToCommand.CommandPrefix))) {
       skipBots {
-        val parts = Extractors.textTokens(msg).getOrElse(Seq.empty)
+        val parts = Extractors.textTokens(msg).getOrElse(Seq.empty).toList
         parts match {
-          case firstName :: middleName :: lastName :: licenseSeries :: licenseNumber :: Nil ⇒
+          case lastName :: firstName :: middleName :: licenseSeries :: licenseNumber :: Nil ⇒
             val driverInfo = DriverInfo(
               fullName = (firstName.trim + " " + middleName.trim + " " + lastName.trim).toUpperCase,
               licenseSeries = licenseSeries.toUpperCase,
@@ -106,7 +106,7 @@ object SpeedingFinesCheckerBot {
     """
       |This bot is intended to periodically check if you exceeded speeding limits.
       |Please send data in the following format:
-      |FIRSTNAME MIDDLENAME LASTNAME CAR_ID_SERIES CAR_ID_NUMBER""".stripMargin
+      |LASTNAME FIRSTNAME MIDDLENAME CAR_ID_SERIES CAR_ID_NUMBER""".stripMargin
 
   private final val SessionCookieReq = Http("http://mvd.gov.by/main.aspx?guid=15791")
   private final val SpeedingBaseCheckReq = Http("http://mvd.gov.by/Ajax.asmx/GetExt")
