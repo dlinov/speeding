@@ -1,9 +1,10 @@
 package io.github.dlinov.speeding
 
 import java.net.HttpCookie
+import java.util.UUID
 
+import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
 import info.mukel.telegrambot4s.api.declarative.{Commands, Help, ToCommand}
-import info.mukel.telegrambot4s.api.{Extractors, Polling, TelegramBot}
 import info.mukel.telegrambot4s.methods.SendMessage
 import info.mukel.telegrambot4s.models._
 import io.github.dlinov.speeding.dao.Dao
@@ -17,41 +18,63 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
 
   import SpeedingFinesCheckerBot._
 
-  override def helpBody(): String = Greeting
+  override def helpFooter(): String = Greeting
 
   onCommandWithHelp('forcecheck)("Force check of speeding fines") { implicit msg ⇒
     skipBots {
-      dao.find(msg.source).unsafeRunSync()
+      val chatId = msg.source
+      logger.info(s"Chat $chatId asked to check its fines")
+      val botResponse = dao.find(chatId).unsafeRunSync()
         .fold(
-          _ ⇒ reply("There was an error processing your request"),
+          err ⇒ {
+            logger.error(s"Couldn't check db for chat $chatId: ${err.message}")
+            "There was an error processing your request"
+          },
           _.fold {
-            reply("There is no saved driver info for you")
+            logger.warn(s"Couldn't find chat $chatId")
+            "There is no saved driver info for you"
           } { d ⇒
             checkDriverFines(retrieveCookies, d)
               .fold {
-                reply("Congratulations! No camera speeding records were found for you.")
-              } {
-                reply(_) // all fines go here
+                logger.info(s"No fines were found for chat $chatId")
+                "Congratulations! No camera speeding records were found for you."
+              } { finesResponse ⇒ // all fines go here
+                logger.info(s"Something was found for $chatId: '$finesResponse'")
+                finesResponse
               }
           })
+      reply(botResponse)
     }
   }
 
   onMessage { implicit msg ⇒
-    if (msg.text.forall(!_.startsWith(ToCommand.CommandPrefix))) {
+    val msgText = msg.text
+    val chatId = msg.source
+    if (msgText.forall(!_.startsWith(ToCommand.CommandPrefix))) {
       skipBots {
-        val parts = Extractors.textTokens(msg).getOrElse(Seq.empty).toList
-        parts match {
-          case lastName :: firstName :: middleName :: licenseSeries :: licenseNumber :: Nil ⇒
+        val botResponse = msgText match {
+          case Some(InputRegex(lastName, firstName, middleName, licenseSeries, licenseNumber)) ⇒
             val driverInfo = DriverInfo(
-              fullName = (firstName.trim + " " + middleName.trim + " " + lastName.trim).toUpperCase,
+              fullName = s"$lastName $firstName $middleName".toUpperCase,
               licenseSeries = licenseSeries.toUpperCase,
               licenseNumber = licenseNumber.toUpperCase)
-            dao.update(msg.source, driverInfo).unsafeRunSync()
-            reply("Your data was saved. You will receive updates when any fine is found")
+            val dbResult = dao.update(chatId, driverInfo).unsafeRunSync()
+            dbResult.fold(
+              err ⇒ {
+                val errorId = UUID.randomUUID()
+                logger.warn(s"Couldn't update data for $chatId [$errorId]: ${err.message}")
+                s"Your data was not saved due to internal error, please try later. Use this error id: $errorId"
+              },
+              _ ⇒ {
+                logger.info(s"Chat $chatId updated its data to $driverInfo")
+                "Your data was saved. You will receive updates when any fine is found"
+              })
+
           case _ ⇒
-            reply("Error: wrong format. Your message must contain 5 words. Use /help to get more info")
+            logger.warn(s"'$msgText' from $chatId didn't match input regex")
+            "Error: wrong format. Your message must contain exactly 5 words. Use /help to get more info"
         }
+        reply(botResponse)
       }
     }
   }
@@ -107,6 +130,9 @@ object SpeedingFinesCheckerBot {
       |This bot is intended to periodically check if you exceeded speeding limits.
       |Please send data in the following format:
       |LASTNAME FIRSTNAME MIDDLENAME CAR_ID_SERIES CAR_ID_NUMBER""".stripMargin
+
+  private final val InputRegex =
+    """^([А-Яа-я]{1,32})\s*([А-Яа-я]{1,32})\s*([А-Яа-я]{1,32})\s*([А-Яа-я]{3})\s*([0-9]{7})\s*$""".r
 
   private final val SessionCookieReq = Http("http://mvd.gov.by/main.aspx?guid=15791")
   private final val SpeedingBaseCheckReq = Http("http://mvd.gov.by/Ajax.asmx/GetExt")
