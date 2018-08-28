@@ -2,12 +2,14 @@ package io.github.dlinov.speeding
 
 import java.net.URI
 
+import com.typesafe.config.ConfigFactory
 import io.github.dlinov.speeding.dao.{Dao, PostgresDao}
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.io.Source
+import scala.util.Try
 
 object Boot extends App {
   private def memoryInfo: String = {
@@ -17,14 +19,16 @@ object Boot extends App {
   }
 
   private val logger = LoggerFactory.getLogger(this.getClass)
+  private val config = ConfigFactory.load()
+
   // Fetch the token from an environment variable or untracked file.
-  private lazy val token = scala.util.Properties
-    .envOrNone("BOT_TOKEN")
+  private val token = Try(config.getString("bot.token"))
     .getOrElse(Source.fromFile("bot.token").getLines().mkString)
+
+  private val interval = Duration.fromNanos(config.getDuration("bot.interval").toNanos)
+
   private final val correctJdbcPrefix = "jdbc:postgresql://"
-  private val dbUri = new URI(scala.util.Properties
-    .envOrNone("DATABASE_URL")
-    .getOrElse("postgres://postgres:password@127.0.0.1:5432/speeding"))
+  private val dbUri = new URI(config.getString("db.postgres.url"))
   private val (user, password) = {
     val parts = dbUri.getAuthority.takeWhile(_ != '@').split(':')
     parts.head → parts.last
@@ -32,11 +36,12 @@ object Boot extends App {
   private val dbUrl = correctJdbcPrefix + dbUri.getHost + ":" + dbUri.getPort + dbUri.getPath
   private val dao: Dao = new PostgresDao(dbUrl, user, password)
   dao.createSchemaIfMissing().unsafeRunSync()
+
   private val bot = new SpeedingFinesCheckerBot(token, dao)
   private val botScheduler = bot.system.scheduler
   private implicit val botExecutionContext: ExecutionContext = bot.executionContext
 
   bot.run()
   botScheduler.schedule(5.seconds, 1.minute, () ⇒ logger.debug(memoryInfo))
-  botScheduler.schedule(10.seconds, 5.minutes, () ⇒ bot.performCheckForAllDrivers())
+  botScheduler.schedule(10.seconds, interval, () ⇒ bot.performCheckForAllDrivers())
 }

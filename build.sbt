@@ -2,12 +2,13 @@ enablePlugins(DockerPlugin, JavaAppPackaging)
 
 name := "speeding"
 
-version := "0.1"
+version := "0.1.1"
 
 scalaVersion := "2.12.6"
 
 libraryDependencies ++= Seq(
   "ch.qos.logback" % "logback-classic" % "1.2.3",
+  "com.typesafe" % "config" % "1.3.3",
   "info.mukel" %% "telegrambot4s" % "3.0.15",
   "org.tpolecat" %% "doobie-core" % "0.5.3",
   "org.tpolecat" %% "doobie-postgres" % "0.5.3",
