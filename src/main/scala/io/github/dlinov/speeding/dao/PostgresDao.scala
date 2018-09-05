@@ -4,7 +4,7 @@ import cats.effect._
 import doobie._
 import doobie.implicits._
 import io.github.dlinov.speeding.dao.Dao.DaoError
-import io.github.dlinov.speeding.model.DriverInfo
+import io.github.dlinov.speeding.model.{DriverInfo, Fine}
 import org.slf4j.LoggerFactory
 
 import scala.util.Try
@@ -72,5 +72,35 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
         },
         n ⇒ IO.pure(n)
       )
+    Try(sql"SELECT COUNT(*) from fines".query[Int].unique.transact(xa).unsafeRunSync())
+      .fold(
+        _ ⇒ {
+          sql"CREATE TABLE fines (id bigint NOT NULL, driver_id bigint NOT NULL, date_time character varying(255) NOT NULL, is_active boolean NOT NULL, CONSTRAINT fines_pkey PRIMARY KEY (id), CONSTRAINT driver_id_fkey FOREIGN KEY (drivers.id)) WITH (OIDS=FALSE);"
+            .update.run.transact(xa)
+        },
+        n ⇒ IO.pure(n)
+      )
+  }
+
+  override def findFine(id: Long): DaoResp[Option[Fine]] = {
+    (for {
+      maybeDriver ← sql"SELECT id, date_time, is_active FROM fines WHERE id = $id"
+        .query[Fine]
+        .option
+    } yield {
+      logger.debug(s"Find by id=$id: $maybeDriver")
+      Right(maybeDriver)
+    }).transact(xa)
+  }
+
+  override def findAllDriverFines(driverId: Long): DaoResp[Seq[Fine]] = {
+    (for {
+      all ← sql"SELECT id, date_time, is_active FROM fines WHERE driver_id = $driverId"
+        .query[Fine]
+        .to[List]
+    } yield {
+      logger.debug(s"Find driver $driverId fines results: $all")
+      Right(all)
+    }).transact(xa)
   }
 }

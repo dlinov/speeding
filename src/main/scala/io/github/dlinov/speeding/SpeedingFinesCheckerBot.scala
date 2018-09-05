@@ -9,6 +9,7 @@ import info.mukel.telegrambot4s.methods.SendMessage
 import info.mukel.telegrambot4s.models._
 import io.github.dlinov.speeding.dao.Dao
 import io.github.dlinov.speeding.model.DriverInfo
+import io.github.dlinov.speeding.model.parser.ResponseParser
 import scalaj.http._
 
 import scala.concurrent.Future
@@ -97,19 +98,16 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
                                 cookies: IndexedSeq[HttpCookie],
                                 driverInfo: DriverInfo): Option[String] = {
     val resp = speedingReq(driverInfo, cookies).asString
-    if (resp.body.contains("<html>")) {
-      logger.warn("Some error: " + resp.body)
-      None
-    } else {
-      if (resp.body.contains("информация не найдена")) {
-        None
-      } else {
-        val text = resp.body
-          .replace("\"\\u003ch2\\u003e", "")
-          .replace("\\u003c/h2\\u003e\"", "")
-        Some(text)
-      }
-    }
+    ResponseParser.parse(resp.body)
+      .fold(
+        err ⇒ Some(err.message),
+        fines ⇒ {
+          // TODO: save fetched fines, don't notify about the same fine twice, mark paid fines
+          fines
+            .headOption
+            .map(_ ⇒ "You have the following fines: " + fines.map(_.toHumanString).mkString("\n"))
+        }
+      )
   }
 
   private def skipBots(action: ⇒ Unit)(implicit msg: Message): Unit = {

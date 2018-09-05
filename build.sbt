@@ -12,7 +12,10 @@ libraryDependencies ++= Seq(
   "info.mukel" %% "telegrambot4s" % "3.0.15",
   "org.tpolecat" %% "doobie-core" % "0.5.3",
   "org.tpolecat" %% "doobie-postgres" % "0.5.3",
-  "org.scalaj" %% "scalaj-http" % "2.4.1")
+  "org.scalaj" %% "scalaj-http" % "2.4.1",
+  "org.scala-lang.modules" %% "scala-xml" % "1.1.0",
+
+  "org.scalatest" %% "scalatest" % "3.0.5" % "test")
 
 scalacOptions ++= Seq(
   "-unchecked",

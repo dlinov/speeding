@@ -2,7 +2,7 @@ package io.github.dlinov.speeding.dao
 
 import cats.effect.IO
 import io.github.dlinov.speeding.dao.Dao.DaoError
-import io.github.dlinov.speeding.model.DriverInfo
+import io.github.dlinov.speeding.model.{DriverInfo, Fine}
 
 trait Dao {
   type DaoResp[+T] = IO[Either[DaoError, _ <: T]]
@@ -14,6 +14,10 @@ trait Dao {
   def find(id: Long): DaoResp[Option[DriverInfo]]
 
   def findAll: DaoResp[Seq[(Long, DriverInfo)]]
+
+  def findFine(fineId: Long): DaoResp[Option[Fine]]
+
+  def findAllDriverFines(driverId: Long): DaoResp[Seq[Fine]]
 }
 
 object Dao {
