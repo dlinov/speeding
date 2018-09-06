@@ -1,6 +1,7 @@
 package io.github.dlinov.speeding.model
 
-case class DriverInfo(
-                       fullName: String,
-                       licenseSeries: String,
-                       licenseNumber: String)
+final case class DriverInfo(
+                             id: Long,
+                             fullName: String,
+                             licenseSeries: String,
+                             licenseNumber: String)

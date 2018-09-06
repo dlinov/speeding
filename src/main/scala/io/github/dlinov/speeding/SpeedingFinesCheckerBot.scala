@@ -3,6 +3,9 @@ package io.github.dlinov.speeding
 import java.net.HttpCookie
 import java.util.UUID
 
+import cats.syntax.semigroup._
+import cats.instances.string._
+import cats.instances.option._
 import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
 import info.mukel.telegrambot4s.api.declarative.{Commands, Help, ToCommand}
 import info.mukel.telegrambot4s.methods.SendMessage
@@ -35,7 +38,7 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
             logger.warn(s"Couldn't find chat $chatId")
             "There is no saved driver info for you"
           } { d ⇒
-            checkDriverFines(retrieveCookies, d)
+            checkDriverFines(retrieveCookies, d, onlyNew = false)
               .fold {
                 logger.info(s"No fines were found for chat $chatId")
                 "Congratulations! No camera speeding records were found for you."
@@ -56,6 +59,7 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
         val botResponse = msgText match {
           case Some(InputRegex(lastName, firstName, middleName, licenseSeries, licenseNumber)) ⇒
             val driverInfo = DriverInfo(
+              id = chatId,
               fullName = s"$lastName $firstName $middleName".toUpperCase,
               licenseSeries = licenseSeries.toUpperCase,
               licenseNumber = licenseNumber.toUpperCase)
@@ -83,10 +87,9 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
   def performCheckForAllDrivers(): Unit = {
     val allDrivers = dao.findAll.unsafeRunSync()
     val cookies = retrieveCookies
-    allDrivers.foreach(_.foreach {
-      case (chatId, driverInfo) ⇒
-        checkDriverFines(cookies, driverInfo)
-          .foreach(sendMessageTo(chatId, _))
+    allDrivers.foreach(_.foreach { driver ⇒
+      checkDriverFines(cookies, driver, onlyNew = true)
+        .foreach(sendMessageTo(driver.id, _))
     })
   }
 
@@ -96,18 +99,35 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
 
   private def checkDriverFines(
                                 cookies: IndexedSeq[HttpCookie],
-                                driverInfo: DriverInfo): Option[String] = {
+                                driverInfo: DriverInfo,
+                                onlyNew: Boolean): Option[String] = {
+    // TODO: wrap everything to IO
     val resp = speedingReq(driverInfo, cookies).asString
-    ResponseParser.parse(resp.body)
-      .fold(
-        err ⇒ Some(err.message),
-        fines ⇒ {
-          // TODO: save fetched fines, don't notify about the same fine twice, mark paid fines
-          fines
-            .headOption
-            .map(_ ⇒ "You have the following fines: " + fines.map(_.toHumanString).mkString("\n"))
+    (for {
+      activeFines ← ResponseParser.parse(driverInfo.id, resp.body)
+      activeFineIds = activeFines.map(_.id).toSet
+      existingUnpaidFines ← dao.findUnpaidDriverFines(driverInfo.id).unsafeRunSync()
+      (unpaidFines, paidFines) = existingUnpaidFines.partition(f ⇒ activeFineIds.contains(f.id))
+      unpaidFineIds = unpaidFines.map(_.id).toSet
+      newFines = activeFines.filter(f ⇒ !unpaidFineIds.contains(f.id))
+      _ ← dao.setFinesPaid(paidFines.map(_.id)).unsafeRunSync()
+      _ ← dao.createFines(newFines).unsafeRunSync()
+    } yield {
+      val paidPart = paidFines
+        .headOption
+        .map { _ ⇒
+          val paid = paidFines.map(_.toHumanString).mkString("\n", "\n", "\n")
+          "You have paid the following fines:" + paid
         }
-      )
+      val fs = if (onlyNew) newFines else activeFines
+      val activePart = fs
+        .headOption
+        .map { _ ⇒
+          val active = fs.map(_.toHumanString).mkString("\n", "\n", "\n")
+          "You have the following active fines:" + active
+        }
+      paidPart |+| activePart
+    }).toOption.flatten
   }
 
   private def skipBots(action: ⇒ Unit)(implicit msg: Message): Unit = {

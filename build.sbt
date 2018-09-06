@@ -2,7 +2,7 @@ enablePlugins(DockerPlugin, JavaAppPackaging)
 
 name := "speeding"
 
-version := "0.2"
+version := "0.3"
 
 scalaVersion := "2.12.6"
 
@@ -14,6 +14,7 @@ libraryDependencies ++= Seq(
   "org.tpolecat" %% "doobie-postgres" % "0.5.3",
   "org.scalaj" %% "scalaj-http" % "2.4.1",
   "org.scala-lang.modules" %% "scala-xml" % "1.1.0",
+  "org.apache.commons" % "commons-text" % "1.4",
 
   "org.scalatest" %% "scalatest" % "3.0.5" % "test")
 
@@ -31,4 +32,4 @@ scalacOptions ++= Seq(
   "-Ywarn-dead-code",
   "-Ywarn-unused")
 
-dockerBaseImage := "openjdk:10-jre-slim"
+dockerBaseImage := "openjdk:11-jre-slim"
