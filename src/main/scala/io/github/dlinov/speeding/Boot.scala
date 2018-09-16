@@ -12,11 +12,11 @@ import scala.io.Source
 import scala.util.Try
 
 object Boot extends App {
-  private def memoryInfo: String = {
+  /*private def memoryInfo: String = {
     val rt = Runtime.getRuntime
     val mb = 1 << 20
     s"free: ${rt.freeMemory() / mb}MB\ttotal: ${rt.totalMemory() / mb}MB\tmax: ${rt.maxMemory() / mb}MB"
-  }
+  }*/
 
   private val logger = LoggerFactory.getLogger(this.getClass)
   private val config = ConfigFactory.load()
@@ -42,6 +42,7 @@ object Boot extends App {
   private implicit val botExecutionContext: ExecutionContext = bot.executionContext
 
   bot.run()
-  botScheduler.schedule(5.seconds, 1.minute, () ⇒ logger.debug(memoryInfo))
+  // botScheduler.schedule(5.seconds, 1.minute, () ⇒ logger.debug(memoryInfo))
   botScheduler.schedule(10.seconds, interval, () ⇒ bot.performCheckForAllDrivers())
+  logger.info("Bot has been started")
 }

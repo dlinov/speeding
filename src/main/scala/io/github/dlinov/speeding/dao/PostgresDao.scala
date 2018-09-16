@@ -1,5 +1,6 @@
 package io.github.dlinov.speeding.dao
 
+import cats.data.EitherT
 import cats.effect._
 import doobie._
 import doobie.implicits._
@@ -18,40 +19,57 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
       "org.postgresql.Driver",
       dbUri,
       user,
-      password
-    )
+      password)
   }
 
   override def createSchemaIfMissing(): IO[Int] = {
+    // check if table `fines` exists
     qCountFines.query[Int].unique.transact(xa).attemptSql
       .flatMap(_.fold(
+        // table `fines` does not exist, create it
         _ ⇒ {
+          // check if table `drivers` exists
           qCountDrivers.query[Int].unique.transact(xa).attemptSql
             .flatMap(sqlResp ⇒ {
+              // table `drivers` does not exist, create it
               val runCreateFinesTable = qCreateFinesTable.update.run
-              sqlResp.fold(
-                _ ⇒ {
-                  (for {
-                    _ ← qCreateDriversTable.update.run
-                    _ ← runCreateFinesTable
-                  } yield 0).transact(xa)
-                },
-                _ ⇒ runCreateFinesTable.transact(xa))
+              sqlResp
+                .fold(
+                  _ ⇒ {
+                    for {
+                      _ ← qCreateDriversTable.update.run
+                      _ ← runCreateFinesTable
+                    } yield 0
+                  },
+                  _ ⇒ runCreateFinesTable)
+                .transact(xa)
             })
         },
-        IO.pure))
+        // table `fines` exists, db is at least v2
+        _ ⇒ {
+          qCheckDriverLang.query[Option[String]].option.transact(xa).attemptSql
+            .flatMap(sqlResp ⇒ {
+              sqlResp.fold(
+                // no column `lang` in `drivers`, add it
+                _ ⇒ qMigration3.update.run.transact(xa),
+                // `drivers` has column `lang`
+                _ ⇒ IO.pure(0)
+              )
+            })
+        }))
   }
 
   override def update(userId: Long, driverInfo: DriverInfo): DaoResp[DriverInfo] = {
     val fn = driverInfo.fullName
     val ls = driverInfo.licenseSeries
     val ln = driverInfo.licenseNumber
+    val lang = driverInfo.lang
     (for {
       maybeExisting ← sql"SELECT id FROM drivers WHERE id = $userId"
         .query[Int]
         .option
       updResult ← maybeExisting.fold {
-        sql"INSERT INTO drivers (id, full_name, license_series, license_number) VALUES ($userId, $fn, $ls, $ln)"
+        sql"INSERT INTO drivers (id, full_name, license_series, license_number, lang) VALUES ($userId, $fn, $ls, $ln, $lang)"
       } { _ ⇒
         sql"UPDATE drivers SET full_name = $fn, license_series = $ls, license_number = $ln WHERE id = $userId"
       }.update.run
@@ -61,9 +79,24 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
     }).transact(xa)
   }
 
+  override def updateLang(userId: Long, lang: String): DaoResp[DriverInfo] = {
+    (for {
+      existing ← EitherT.fromOptionF(sql"SELECT id, full_name, license_series, license_number, lang FROM drivers WHERE id = $userId"
+        .query[DriverInfo]
+        .option, error(s"No user id=$userId found"))
+      _ ← EitherT.right[DaoError] {
+        sql"UPDATE drivers SET lang = $lang WHERE id = $userId;"
+          .update
+          .run
+      }
+    } yield {
+      existing.copy(lang = lang)
+    }).value.transact(xa)
+  }
+
   override def find(id: Long): DaoResp[Option[DriverInfo]] = {
     (for {
-      maybeDriver ← sql"SELECT id, full_name, license_series, license_number FROM drivers WHERE id = $id"
+      maybeDriver ← sql"SELECT id, full_name, license_series, license_number, lang FROM drivers WHERE id = $id"
         .query[DriverInfo]
         .option
     } yield {
@@ -74,7 +107,7 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
 
   override def findAll: DaoResp[Seq[DriverInfo]] = {
     (for {
-      all ← sql"SELECT id, full_name, license_series, license_number FROM drivers"
+      all ← sql"SELECT id, full_name, license_series, license_number, lang FROM drivers"
         .query[DriverInfo]
         .to[List]
     } yield {
@@ -84,13 +117,13 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
   }
 
   override def createFines(fines: Seq[Fine]): DaoResp[Seq[Fine]] = {
-    def createFine(fine: Fine): DaoResp[Fine] = {
+    def createFine(f: Fine): DaoResp[Fine] = {
       (for {
-        _ ← sql"INSERT INTO fines (id, driver_id, date_time, is_active) VALUES (${fine.id}, ${fine.driverId}, ${fine.timestamp}, ${fine.isActive});"
+        _ ← sql"INSERT INTO fines (id, driver_id, date_time, is_active) VALUES (${ f.id}, ${f.driverId}, ${f.timestamp}, ${f.isActive});"
           .update.run
       } yield {
-        logger.debug(s"$fine was saved to db")
-        Right(fine)
+        logger.debug(s"$f was saved to db")
+        Right(f)
       }).transact(xa)
     }
 
@@ -100,7 +133,7 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
           IO(Right[DaoError, Seq[Fine]](acc))
         } { f ⇒ {
             val saveResult = createFine(f).unsafeRunSync()
-            saveResult.fold(e ⇒ IO(Left(e)), x ⇒ inner(acc :+ f, rem.tail))
+            saveResult.fold(e ⇒ IO(Left(e)), _ ⇒ inner(acc :+ f, rem.tail))
           }
         }
     }
@@ -110,7 +143,7 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
 
   override def findFine(id: Long): DaoResp[Option[Fine]] = {
     (for {
-      maybeDriver ← sql"SELECT id, date_time, is_active FROM fines WHERE id = $id"
+      maybeDriver ← sql"SELECT id, driver_id, date_time, is_active FROM fines WHERE id = $id"
         .query[Fine]
         .option
     } yield {
@@ -121,7 +154,7 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
 
   override def findAllDriverFines(driverId: Long): DaoResp[Seq[Fine]] = {
     (for {
-      all ← sql"SELECT id, date_time, is_active FROM fines WHERE driver_id = $driverId"
+      all ← sql"SELECT id, driver_id, date_time, is_active FROM fines WHERE driver_id = $driverId"
         .query[Fine]
         .to[List]
     } yield {
@@ -164,14 +197,26 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
 
     inner(0, fineIds)
   }
+
+  override def deleteDriverInfo(userId: Long): DaoResp[Unit] = {
+    (for {
+      _ ← sql"DELETE FROM fines WHERE driver_id = $userId;".update.run
+      _ ← sql"DELETE FROM drivers WHERE id = $userId;".update.run
+    } yield {
+      logger.debug(s"User $userId info was removed from db")
+      Right(())
+    }).transact(xa)
+  }
 }
 
 object PostgresDao {
 
   val qCountFines = sql"SELECT COUNT(*) from fines"
   val qCountDrivers = sql"SELECT COUNT(*) from drivers"
+  val qCheckDriverLang = sql"SELECT lang from drivers LIMIT 1;"
 
   val qCreateFinesTable = sql"CREATE TABLE fines (id bigint NOT NULL, driver_id bigint NOT NULL, date_time character varying(255) NOT NULL, is_active boolean NOT NULL, CONSTRAINT fines_pkey PRIMARY KEY (id), CONSTRAINT driver_id_fkey FOREIGN KEY (driver_id) REFERENCES drivers (id)) WITH (OIDS=FALSE);"
-  val qCreateDriversTable = sql"CREATE TABLE drivers (id bigint NOT NULL, full_name character varying(255), license_series character varying(15), license_number character varying(15), CONSTRAINT drivers_pkey PRIMARY KEY (id)) WITH (OIDS=FALSE);"
+  val qCreateDriversTable = sql"CREATE TABLE drivers (id bigint NOT NULL, full_name character varying(255), license_series character varying(15), license_number character varying(15), lang character varying(7), CONSTRAINT drivers_pkey PRIMARY KEY (id)) WITH (OIDS=FALSE);"
+  val qMigration3 = sql"ALTER TABLE drivers ADD COLUMN lang character varying(7);"
 
 }

@@ -1,9 +1,8 @@
-package io.github.dlinov.speeding
+package io.github.dlinov.speeding.model.parser
 
 import java.time.ZonedDateTime
 
 import io.github.dlinov.speeding.model.{Constants, Fine}
-import io.github.dlinov.speeding.model.parser.ResponseParser
 import org.scalatest.{EitherValues, MustMatchers, WordSpec}
 
 class ResponseParserSpec extends WordSpec with MustMatchers with EitherValues {

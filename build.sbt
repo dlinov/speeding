@@ -2,7 +2,7 @@ enablePlugins(DockerPlugin, JavaAppPackaging)
 
 name := "speeding"
 
-version := "0.3"
+version := "0.4"
 
 scalaVersion := "2.12.6"
 
@@ -15,8 +15,10 @@ libraryDependencies ++= Seq(
   "org.scalaj" %% "scalaj-http" % "2.4.1",
   "org.scala-lang.modules" %% "scala-xml" % "1.1.0",
   "org.apache.commons" % "commons-text" % "1.4",
+  "org.jmotor" %% "scala-i18n" % "1.0.6",
 
-  "org.scalatest" %% "scalatest" % "3.0.5" % "test")
+  "com.h2database" % "h2" % "1.4.197" % Test,
+  "org.scalatest" %% "scalatest" % "3.0.5" % Test)
 
 scalacOptions ++= Seq(
   "-unchecked",
