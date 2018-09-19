@@ -3,91 +3,94 @@ package io.github.dlinov.speeding
 import java.net.HttpCookie
 import java.util.{Locale, UUID}
 
-import cats.data.EitherT
 import cats.effect.IO
 import cats.syntax.semigroup._
 import cats.instances.string._
 import cats.instances.option._
 import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
-import info.mukel.telegrambot4s.api.declarative.{Callbacks, Commands, Help, ToCommand}
+import info.mukel.telegrambot4s.api.declarative.{Callbacks, Commands, ToCommand}
 import info.mukel.telegrambot4s.methods.SendMessage
 import info.mukel.telegrambot4s.models._
-import io.github.dlinov.speeding.dao.Dao
-import io.github.dlinov.speeding.dao.Dao.DaoError
+import io.github.dlinov.speeding.dao.{Dao, DaoProvider}
 import io.github.dlinov.speeding.model.DriverInfo
 import io.github.dlinov.speeding.model.parser.ResponseParser
-import org.jmotor.i18n.Messages
 import scalaj.http._
 
 import scala.concurrent.Future
 
-class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
-  extends TelegramBot with Commands with Polling with Callbacks with Help {
+class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
+  extends TelegramBot with Commands with Polling with Callbacks with DaoProvider with Localized with LocalizedHelp {
 
   import SpeedingFinesCheckerBot._
 
-  override def helpFooter(): String = Greeting
-
-  private val messages = Messages("messages")
-  private val defaultLocale = new Locale("ru") // intentionally left non-implicit
-
-  onCommandWithHelp('forcecheck)("Force check of speeding fines") { implicit msg ⇒
+  onCommandWithHelp('forcecheck)("bot.description.forcecheck") { implicit msg ⇒
     skipBots {
       val chatId = msg.source
       logger.info(s"Chat $chatId asked to check its fines")
-      val botResponse = dao.find(chatId).unsafeRunSync()
-        .fold(
-          err ⇒ {
-            val errorId = UUID.randomUUID()
-            logger.error(s"Couldn't check db for chat $chatId [$errorId]: ${err.message}")
-            messages.format("errors.internal", errorId)(defaultLocale)
-          },
-          _.fold {
-            logger.warn(s"Couldn't find chat $chatId")
-            messages.format("errors.chatNotFound")(defaultLocale)
-          } { d ⇒
-          implicit val locale: Locale = d.locale
-            checkDriverFines(retrieveCookies, d, onlyNew = false)
-              .fold {
-                logger.info(s"No fines were found for chat $chatId")
-                messages.format("noFinesFound")
-              } { finesResponse ⇒ // all fines go here
-                logger.info(s"Something was found for $chatId: '$finesResponse'")
-                finesResponse
-              }
-          })
-      reply(botResponse)
+      (for {
+        explicitUserLocale ← getUserLocale
+        driverResp ← dao.findDriver(chatId)
+      } yield {
+        implicit val userLocale: Locale = explicitUserLocale
+        val botResponse = driverResp
+          .fold(
+            err ⇒ {
+              val errorId = UUID.randomUUID()
+              logger.error(s"Couldn't check db for chat $chatId [$errorId]: ${err.message}")
+              messages.format("errors.internal", errorId)
+            },
+            _.fold {
+              logger.warn(s"Couldn't find chat $chatId")
+              messages.format("errors.chatNotFound")
+            } { d ⇒
+              checkDriverFines(retrieveCookies, d, onlyNew = false)
+                .fold {
+                  logger.info(s"No fines were found for chat $chatId")
+                  messages.format("fines.empty")
+                } { finesResponse ⇒ // all fines go here
+                  logger.info(s"Something was found for $chatId: '$finesResponse'")
+                  finesResponse
+                }
+            })
+        reply(botResponse)
+      }).unsafeRunSync()
     }
   }
 
-  onCommandWithHelp('lang)("Изменить язык бота") { implicit msg ⇒
+  onCommandWithHelp('lang)("bot.description.updLang") { implicit msg ⇒
     skipBots {
       val chatId = msg.source
       logger.info(s"Chat $chatId asked to change bot language")
-
-      dao.find(chatId).unsafeRunSync()
-        .fold(
-          err ⇒ {
-            val errorId = UUID.randomUUID()
-            logger.error(s"Couldn't check db for chat $chatId [$errorId]: ${err.message}")
-            reply(messages.format("errors.internal", errorId)(defaultLocale))
-          },
-          _.fold {
-            logger.warn(s"Couldn't find chat $chatId")
-            reply(messages.format("errors.chatNotFound")(defaultLocale))
-          } { d ⇒
-            val supportedLanguages = Seq(
-              "\uD83C\uDDE7\uD83C\uDDFE" → "by",
-              "\uD83C\uDDF7\uD83C\uDDFA" → "ru")
-            val inlineBtns = InlineKeyboardMarkup(Seq(
-              supportedLanguages
-                .map(lang ⇒ InlineKeyboardButton(lang._1, callbackData = Some(lang._2)))))
-            val currentLanguage = supportedLanguages
-              .find(_._2 == d.lang)
-              .map(_._1)
-              .getOrElse(defaultLocale.getLanguage)
-            reply(text = messages.format("lang.current", currentLanguage)(d.locale), replyMarkup = Some(inlineBtns))
-          })
+      (for {
+        explicitUserLocale ← getUserLocale
+        userResp ← dao.findUser(chatId)
+      } yield {
+        implicit val userLocale: Locale = explicitUserLocale
+        userResp
+          .fold(
+            err ⇒ {
+              val errorId = UUID.randomUUID()
+              logger.error(s"Couldn't check db for chat $chatId [$errorId]: ${err.message}")
+              reply(messages.format("errors.internal", errorId))
+            },
+            _.fold {
+              logger.warn(s"Couldn't find chat $chatId")
+              reply(messages.format("errors.chatNotFound"))
+            } { u ⇒
+              val supportedLanguages = Seq(
+                "\uD83C\uDDE7\uD83C\uDDFE" → "by",
+                "\uD83C\uDDF7\uD83C\uDDFA" → "ru",
+                "\uD83C\uDDEC\uD83C\uDDE7" → "en")
+              val inlineBtns = InlineKeyboardMarkup(Seq(
+                supportedLanguages
+                  .map(lang ⇒ InlineKeyboardButton(lang._1, callbackData = Some(lang._2)))))
+              val currentLanguage = supportedLanguages
+                .find(_._2 == u.lang)
+                .map(_._1)
+                .getOrElse(userLocale.getLanguage)
+              reply(text = messages.format("lang.current", currentLanguage)(u.locale), replyMarkup = Some(inlineBtns))
+            })
+      }).unsafeRunSync()
     }
   }
 
@@ -99,39 +102,43 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
     callbackQuery.data.foreach { lang ⇒
       logger.debug(s"data: $lang")
       val desiredLocale = new Locale(lang)
-      dao.updateLang(userId, lang)
-        .unsafeRunSync()
-        .fold(
-          err ⇒ {
-            val errId = UUID.randomUUID()
-            logger.warn(s"Failed to update user $userId language [$errId]: ${err.message}")
-            ackCallback(text = Some(messages.format("errors.internal", errId)(desiredLocale)))
-          },
-          _ ⇒ {
-            ackCallback(text = Some(messages.format("lang.changed")(desiredLocale)))
-          }
-        )
+      (for {
+        resp ← dao.updateUser(userId, lang)
+      } yield {
+        resp
+          .fold(
+            err ⇒ {
+              val errId = UUID.randomUUID()
+              logger.warn(s"Failed to update user $userId language [$errId]: ${err.message}")
+              ackCallback(text = Some(messages.format("errors.internal", errId)(desiredLocale)))
+            },
+            _ ⇒ {
+              ackCallback(text = Some(messages.format("lang.changed")(desiredLocale)))
+            }
+          )
+      }).unsafeRunSync()
     }
   }
 
-  onCommandWithHelp('stop, 'delete, 'remove)("Удалить данные техпаспорта и отменить проверку") { implicit msg ⇒
+  onCommandWithHelp('stop, 'delete, 'remove)("bot.description.removeData") { implicit msg ⇒
     skipBots {
       val chatId = msg.source
       logger.info(s"Chat $chatId asked to remove driver data")
-      val botResponse = (for {
-        driver ← EitherT[IO, DaoError, Option[DriverInfo]](dao.find(chatId))
-        _ ← EitherT[IO, DaoError, Unit](dao.deleteDriverInfo(chatId))
+      (for {
+        explicitUserLocale ← getUserLocale
+        deleteInfoResp ← dao.deleteUserData(chatId)
       } yield {
-        messages.format("data.removed")(driver.map(_.locale).getOrElse(defaultLocale))
-      }).value.unsafeRunSync()
-        .fold(
-          err ⇒ {
-            val errorId = UUID.randomUUID()
-            logger.error(s"Couldn't check db for chat $chatId [$errorId]: ${err.message}")
-            messages.format("errors.internal", errorId)(defaultLocale)
-          },
-          identity)
-      reply(botResponse)
+        implicit val userLocale: Locale = explicitUserLocale
+        val botResponse = deleteInfoResp
+          .fold(
+            err ⇒ {
+              val errorId = UUID.randomUUID()
+              logger.error(s"Couldn't clear user $chatId data [$errorId]: ${err.message}")
+              messages.format("errors.internal", errorId)
+            },
+            _ ⇒ messages.format("data.removed"))
+        reply(botResponse)
+      }).unsafeRunSync()
     }
   }
 
@@ -140,41 +147,53 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
     val chatId = msg.source
     if (msgText.forall(!_.startsWith(ToCommand.CommandPrefix))) {
       skipBots {
-        val botResponse = msgText match {
-          case Some(InputRegex(lastName, firstName, middleName, licenseSeries, licenseNumber)) ⇒
-            val driverInfo = DriverInfo(
-              id = chatId,
-              fullName = s"$lastName $firstName $middleName".toUpperCase,
-              licenseSeries = licenseSeries.toUpperCase,
-              licenseNumber = licenseNumber.toUpperCase,
-              lang = defaultLocale.getLanguage)
-            val dbResult = dao.update(chatId, driverInfo).unsafeRunSync()
-            dbResult.fold(
-              err ⇒ {
-                val errorId = UUID.randomUUID()
-                logger.warn(s"Couldn't update data for $chatId [$errorId]: ${err.message}")
-                messages.format("errors.save.internal", errorId)(defaultLocale)
-              },
-              _ ⇒ {
-                logger.info(s"Chat $chatId updated its data to $driverInfo")
-                messages.format("data.saved")(defaultLocale)
-              })
-
-          case _ ⇒
-            logger.warn(s"'$msgText' from $chatId didn't match input regex")
-            messages.format("errors.save.badrequest")(defaultLocale)
-        }
+        val botResponse = getUserLocale
+          .flatMap { implicit userLocale ⇒
+            msgText match {
+              case Some(InputRegex(lastName, firstName, middleName, licenseSeries, licenseNumber)) ⇒
+                val driverInfo = DriverInfo(
+                  id = chatId,
+                  fullName = s"$lastName $firstName $middleName".toUpperCase,
+                  licenseSeries = licenseSeries.toUpperCase,
+                  licenseNumber = licenseNumber.toUpperCase)
+                dao.updateDriver(chatId, driverInfo).map(_.fold(
+                  err ⇒ {
+                    val errorId = UUID.randomUUID()
+                    logger.warn(s"Couldn't update data for $chatId [$errorId]: ${err.message}")
+                    messages.format("errors.save.internal", errorId)
+                  },
+                  _ ⇒ {
+                    logger.info(s"Chat $chatId updated its data to $driverInfo")
+                    messages.format("data.saved")
+                  }))
+              case _ ⇒
+                logger.warn(s"'$msgText' from $chatId didn't match input regex")
+                IO.pure(messages.format("errors.save.badrequest"))
+            }
+          }.unsafeRunSync()
         reply(botResponse)
       }
     }
   }
 
   def performCheckForAllDrivers(): Unit = {
-    val allDrivers = dao.findAll.unsafeRunSync()
     val cookies = retrieveCookies
+    // TODO: for-comprehension
+    val allDrivers = dao.findAll.unsafeRunSync()
     allDrivers.foreach(_.foreach { driver ⇒
-      checkDriverFines(cookies, driver, onlyNew = true)
-        .foreach(sendMessageTo(driver.id, _))
+      val userId = driver.id
+      dao.findUser(userId)
+        .map(_.fold(
+          err ⇒ {
+            logger.warn(s"Cannot query user $userId, but driver info exists: ${err.message}")
+          },
+          _.fold {
+            logger.warn(s"User $userId was not found, but driver info exists")
+          } { user ⇒
+            checkDriverFines(cookies, driver, onlyNew = true)(user.locale)
+              .foreach(sendMessageTo(userId, _))
+          }))
+        .unsafeRunSync()
     })
   }
 
@@ -185,7 +204,7 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
   private def checkDriverFines(
                                 cookies: IndexedSeq[HttpCookie],
                                 driverInfo: DriverInfo,
-                                onlyNew: Boolean): Option[String] = {
+                                onlyNew: Boolean)(implicit locale: Locale): Option[String] = {
     // TODO: wrap everything to IO
     val resp = speedingReq(driverInfo, cookies).asString
     (for {
@@ -202,14 +221,14 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
         .headOption
         .map { _ ⇒
           val paid = paidFines.map(_.toHumanString).mkString("\n", "\n", "\n")
-          "Вы оплатили следующие штрафы:" + paid
+          messages.format("fines.paid") + paid
         }
       val fs = if (onlyNew) newFines else activeFines
       val activePart = fs
         .headOption
         .map { _ ⇒
           val active = fs.map(_.toHumanString).mkString("\n", "\n", "\n")
-          "У вас есть неоплаченные штрафы:" + active
+          messages.format("fines.unpaid") + active
         }
       paidPart |+| activePart
     }).toOption.flatten
@@ -228,12 +247,6 @@ class SpeedingFinesCheckerBot(override val token: String, dao: Dao)
 }
 
 object SpeedingFinesCheckerBot {
-  private final val Greeting =
-    """
-      |Этот бот будет проверять информацию о превышении вами скорости.
-      |Чтобы добавить ваши данные отправьте сообщение следующего вида:
-      |ФАМИЛИЯ ИМЯ ОТЧЕСТВО СЕРИЯ_ТЕХПАСПОРТА НОМЕР_ТЕХПАСПОРТА""".stripMargin
-
   private final val InputRegex =
     """^([А-Я]{1,32})\s*([А-Я]{1,32})\s*([А-Я]{1,32})\s*([А-Я]{3})\s*([0-9]{7})\s*$""".r
 

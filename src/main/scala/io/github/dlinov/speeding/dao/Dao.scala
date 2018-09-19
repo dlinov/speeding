@@ -2,7 +2,7 @@ package io.github.dlinov.speeding.dao
 
 import cats.effect.IO
 import io.github.dlinov.speeding.dao.Dao.{DaoError, GenericDaoError}
-import io.github.dlinov.speeding.model.{DriverInfo, Fine}
+import io.github.dlinov.speeding.model.{BotUser, DriverInfo, Fine}
 
 trait Dao {
   type DaoResp[+T] = IO[Either[DaoError, _ <: T]]
@@ -11,13 +11,17 @@ trait Dao {
 
   def createSchemaIfMissing(): IO[Int]
 
-  def update(userId: Long, driverInfo: DriverInfo): DaoResp[DriverInfo]
+  def updateDriver(userId: Long, driverInfo: DriverInfo): DaoResp[DriverInfo]
 
-  def updateLang(userId: Long, lang: String): DaoResp[DriverInfo]
+  def findDriver(id: Long): DaoResp[Option[DriverInfo]]
 
-  def find(id: Long): DaoResp[Option[DriverInfo]]
+  def findUser(id: Long): DaoResp[Option[BotUser]]
 
   def findAll: DaoResp[Seq[DriverInfo]]
+
+  def updateUser(userId: Long, lang: String): DaoResp[BotUser]
+
+  def createFine(fine: Fine): DaoResp[Fine]
 
   def createFines(fines: Seq[Fine]): DaoResp[Seq[Fine]]
 
@@ -29,7 +33,7 @@ trait Dao {
 
   def setFinesPaid(fineIds: Seq[Long]): DaoResp[Int]
 
-  def deleteDriverInfo(userId: Long): DaoResp[Unit]
+  def deleteUserData(userId: Long): DaoResp[Unit]
 }
 
 object Dao {
