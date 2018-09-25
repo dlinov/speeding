@@ -1,9 +1,12 @@
 package io.github.dlinov.speeding.model.parser
 
+import java.nio.charset.StandardCharsets
 import java.time.ZonedDateTime
 
 import io.github.dlinov.speeding.model.{Constants, Fine}
 import org.scalatest.{EitherValues, MustMatchers, WordSpec}
+
+import scala.io.Source
 
 class ResponseParserSpec extends WordSpec with MustMatchers with EitherValues {
 
@@ -11,15 +14,12 @@ class ResponseParserSpec extends WordSpec with MustMatchers with EitherValues {
 
   "ResponseParser" should {
     "parse response with no fines" in {
-      val input =
-        """"\u003ch2\u003eПо заданным критериям поиска информация не найдена\u003c/h2\u003e""""
+      val input = readResourceAsText("/response-no-fines.txt")
       ResponseParser.parse(driverId, input).right.value must be(Seq.empty)
     }
 
     "parse response with fines" in {
-      val input =
-        """"\u003ctable class=\"ii\" cellspacing=\"0\" cellpadding=\"2\" border=\"1\"\u003e\r\n  \u003ctr style=\"background-color: silver\"\u003e\r\n    \u003ctd\u003eФамилия, Имя, Отчество\u003c/td\u003e\r\n    \u003ctd\u003eСерия\u003c/td\u003e\r\n    \u003ctd\u003eСвид. о регистрации\u003c/td\u003e\r\n    \u003ctd\u003eДата и время правонарушения\u003c/td\u003e\r\n    \u003ctd\u003eРег. № правонарушения\u003c/td\u003e\r\n  \u003c/tr\u003e\r\n  \u003ctr\u003e\r\n    \u003ctd\u003eФ И О\u003c/td\u003e\r\n    \u003ctd\u003eMAA\u003c/td\u003e\r\n    \u003ctd\u003e1870000\u003c/td\u003e\r\n    \u003ctd\u003e01.08.2018 1:11:00\u003c/td\u003e\r\n    \u003ctd\u003e18123400789\u003c/td\u003e\r\n  \u003c/tr\u003e\r\n\u003c/table\u003e\r\n\u003cdiv\u003e\u003cb\u003eДата и время последнего обновления данных 05.09.2018 10:02:35.\u003c/b\u003e\u003c/div\u003e\r\n\u003cp\u003eШтраф за \r\nправонарушение можно оплатить в любом банке, подключенном к системе \"Расчет\" (ЕРИП). \r\nОплату можно совершить в платежно-справочном терминале, интернет-банкинге, \r\nбанкомате, кассе банка и других пунктах банковского обслуживания. Более подробная информация о перечне пунктов \r\nбанковского обслуживания, задействованных в системе \"Расчет\" (ЕРИП), размещена \r\nна сайте\r\n\u003ca target=\"_blank\" style=\"color: blue\" href=\"http://raschet.by/\"\u003e\r\nwww.raschet.by\u003c/a\u003e в разделе \"Плательщик\". В случае возникновения вопросов по \r\nсовершению оплаты обращайтесь к сотрудникам банка.\u003c/p\u003e\r\n\u003cp\u003eДля оплаты правонарушения Вам, либо сотруднику банка необходимо:\u003c/p\u003e\r\n\u003col\u003e\r\n  \u003cli\u003eВ системе \"Расчет\" (ЕРИП) последовательно перейти в разделы \"МВД\" - \"ГАИ - \r\nфотофиксация\", после чего выбрать услугу \"Скоростной режим\" (номер услуги 381141);\u003c/li\u003e\r\n  \u003cli\u003eВвести регистрационный номер правонарушения;\u003c/li\u003e\r\n  \u003cli\u003eСверить данные о правонарушении (фамилию, имя, отчество владельца транспортного средства \r\nи сумму штрафа);\u003c/li\u003e\r\n  \u003cli\u003eСовершить оплату.\u003c/li\u003e\r\n\u003c/ol\u003e\r\n\u003cp\u003eВ случае оплаты в РУП \"БелПочта\" квитанцию об оплате необходимо отправить заказным \r\nписьмом по адресу: 220030, г. Минск, ул. Красноармейская, д. 21. Отдел по обеспечению деятельности Единой системы фотофиксации нарушений скоростного режима МВД Республики Беларусь (ООД ЕСФНСР МВД). Счет для оплаты в РУП \"БелПочта\": \r\n3602916010009, код платежа 05104.\u003c/p\u003e""""
-
+      val input = readResourceAsText("/response-with-fines.txt")
       val expectedFine1 = Fine(
         id = 18123400789L,
         driverId = driverId,
@@ -46,9 +46,13 @@ class ResponseParserSpec extends WordSpec with MustMatchers with EitherValues {
                      |            </table>
                      |            <br>
                      |    </body>
-                     |</html>"""
+                     |</html>""".stripMargin
       ResponseParser.parse(driverId, input1).isLeft must be(true)
       ResponseParser.parse(driverId, input2).isLeft must be(true)
     }
+  }
+
+  private def readResourceAsText(resource: String) = {
+    Source.fromFile(getClass.getResource(resource).toURI, StandardCharsets.UTF_8.name).mkString
   }
 }
