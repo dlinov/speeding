@@ -5,7 +5,8 @@ import io.github.dlinov.speeding.dao.Dao.{DaoError, GenericDaoError}
 import io.github.dlinov.speeding.model.{BotUser, DriverInfo, Fine}
 
 trait Dao {
-  type DaoResp[+T] = IO[Either[DaoError, _ <: T]]
+  type DaoEither[+T] = Either[DaoError, _ <: T]
+  type DaoResp[+T] = IO[DaoEither[T]]
 
   def error(message: String): DaoError = new GenericDaoError(message)
 
