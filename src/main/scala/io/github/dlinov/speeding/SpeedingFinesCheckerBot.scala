@@ -3,16 +3,22 @@ package io.github.dlinov.speeding
 import java.net.HttpCookie
 import java.util.{Locale, UUID}
 
+import cats.{Applicative, Functor}
 import cats.effect.IO
-import cats.syntax.semigroup._
-import cats.instances.string._
+import cats.instances.either._
+import cats.instances.list._
 import cats.instances.option._
-import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
+import cats.instances.string._
+import cats.syntax.either._
+import cats.syntax.functor._
+import cats.syntax.semigroup._
+import cats.syntax.traverse._
 import info.mukel.telegrambot4s.api.declarative.{Callbacks, Commands, ToCommand}
+import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
 import info.mukel.telegrambot4s.methods.SendMessage
 import info.mukel.telegrambot4s.models._
 import io.github.dlinov.speeding.dao.{Dao, DaoProvider}
-import io.github.dlinov.speeding.model.DriverInfo
+import io.github.dlinov.speeding.model.{BotUser, DriverInfo}
 import io.github.dlinov.speeding.model.parser.ResponseParser
 import scalaj.http._
 
@@ -22,6 +28,13 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
   extends TelegramBot with Commands with Polling with Callbacks with DaoProvider with Localized with LocalizedHelp {
 
   import SpeedingFinesCheckerBot._
+
+  type EitherS[A] = Either[String, A]
+  type IOEitherS[A] = IO[EitherS[A]]
+  implicit val applicative: Applicative[IOEitherS] = Applicative[IO] compose Applicative[EitherS]
+
+  val ioEitherFunctor = Functor[IO] compose Functor[dao.DaoEither]
+  val ioEitherListFunctor = ioEitherFunctor compose Functor[List]
 
   onCommandWithHelp('forcecheck)("bot.description.forcecheck") { implicit msg ⇒
     skipBots {
@@ -176,26 +189,25 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
     }
   }
 
+  /*_*/
   def performCheckForAllDrivers(): Unit = {
     val cookies = retrieveCookies
-    // TODO: for-comprehension
-    val allDrivers = dao.findAll.unsafeRunSync()
-    allDrivers.foreach(_.foreach { driver ⇒
+    val allDrivers = ioEitherFunctor.map(dao.findAll)(_.toList)
+    val value = ioEitherListFunctor.map(allDrivers) { driver ⇒
       val userId = driver.id
-      dao.findUser(userId)
-        .map(_.fold(
-          err ⇒ {
-            logger.warn(s"Cannot query user $userId, but driver info exists: ${err.message}")
-          },
-          _.fold {
-            logger.warn(s"User $userId was not found, but driver info exists")
-          } { user ⇒
-            checkDriverFines(cookies, driver, onlyNew = true)(user.locale)
-              .foreach(sendMessageTo(userId, _))
-          }))
-        .unsafeRunSync()
-    })
+      dao.findUser(userId).map { _
+        .leftMap(err ⇒ s"Cannot query user $userId, but driver info exists: ${err.message}")
+        .flatMap(_.toRight(s"User $userId was not found, but driver info exists"))
+        .map { user ⇒
+          checkDriverFines(cookies, driver, onlyNew = true)(user.locale)
+            .map(sendMessageTo(userId, _))
+        }.void
+      }
+    }
+    value.flatMap(_.leftMap(_.message).flatTraverse(_.traverse[IOEitherS, Unit](identity)))
+      .unsafeRunSync()
   }
+  /*_*/
 
   private def sendMessageTo(chatId: Long, text: String): Future[Message] = {
     request(SendMessage(chatId, text))
