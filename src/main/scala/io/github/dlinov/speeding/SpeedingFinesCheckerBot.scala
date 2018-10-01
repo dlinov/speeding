@@ -18,11 +18,12 @@ import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
 import info.mukel.telegrambot4s.methods.SendMessage
 import info.mukel.telegrambot4s.models._
 import io.github.dlinov.speeding.dao.{Dao, DaoProvider}
-import io.github.dlinov.speeding.model.{BotUser, DriverInfo}
+import io.github.dlinov.speeding.model.DriverInfo
 import io.github.dlinov.speeding.model.parser.ResponseParser
 import scalaj.http._
 
 import scala.concurrent.Future
+import scala.util.Try
 
 class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
   extends TelegramBot with Commands with Polling with Callbacks with DaoProvider with Localized with LocalizedHelp {
@@ -191,21 +192,23 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
 
   /*_*/
   def performCheckForAllDrivers(): Unit = {
-    val cookies = retrieveCookies
-    val allDrivers = ioEitherFunctor.map(dao.findAll)(_.toList)
-    val value = ioEitherListFunctor.map(allDrivers) { driver ⇒
-      val userId = driver.id
-      dao.findUser(userId).map { _
-        .leftMap(err ⇒ s"Cannot query user $userId, but driver info exists: ${err.message}")
-        .flatMap(_.toRight(s"User $userId was not found, but driver info exists"))
-        .map { user ⇒
-          checkDriverFines(cookies, driver, onlyNew = true)(user.locale)
-            .map(sendMessageTo(userId, _))
-        }.void
+    Try(retrieveCookies)
+      .map { cookies ⇒
+        val allDrivers = ioEitherFunctor.map(dao.findAll)(_.toList)
+        val value = ioEitherListFunctor.map(allDrivers) { driver ⇒
+          val userId = driver.id
+          dao.findUser(userId).map { _
+            .leftMap(err ⇒ s"Cannot query user $userId, but driver info exists: ${err.message}")
+            .flatMap(_.toRight(s"User $userId was not found, but driver info exists"))
+            .map { user ⇒
+              checkDriverFines(cookies, driver, onlyNew = true)(user.locale)
+                .map(sendMessageTo(userId, _))
+            }.void
+          }
+        }
+        value.flatMap(_.leftMap(_.message).flatTraverse(_.traverse[IOEitherS, Unit](identity)))
+          .unsafeRunSync()
       }
-    }
-    value.flatMap(_.leftMap(_.message).flatTraverse(_.traverse[IOEitherS, Unit](identity)))
-      .unsafeRunSync()
   }
   /*_*/
 
@@ -217,9 +220,9 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
                                 cookies: IndexedSeq[HttpCookie],
                                 driverInfo: DriverInfo,
                                 onlyNew: Boolean)(implicit locale: Locale): Option[String] = {
-    // TODO: wrap everything to IO
-    val resp = speedingReq(driverInfo, cookies).asString
+    // TODO: wrap everything to IO?
     (for {
+      resp ← Try(speedingReq(driverInfo, cookies).asString).toEither
       activeFines ← ResponseParser.parse(driverInfo.id, resp.body)
       activeFineIds = activeFines.map(_.id).toSet
       existingUnpaidFines ← dao.findUnpaidDriverFines(driverInfo.id).unsafeRunSync()
