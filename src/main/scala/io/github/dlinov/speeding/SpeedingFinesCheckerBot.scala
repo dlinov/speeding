@@ -34,8 +34,8 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
   type IOEitherS[A] = IO[EitherS[A]]
   implicit val applicative: Applicative[IOEitherS] = Applicative[IO] compose Applicative[EitherS]
 
-  val ioEitherFunctor = Functor[IO] compose Functor[dao.DaoEither]
-  val ioEitherListFunctor = ioEitherFunctor compose Functor[List]
+  private val ioEitherFunctor = Functor[IO] compose Functor[dao.DaoEither]
+  private val ioEitherListFunctor = ioEitherFunctor compose Functor[List]
 
   onCommandWithHelp('forcecheck)("bot.description.forcecheck") { implicit msg ⇒
     skipBots {
@@ -57,14 +57,24 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
               logger.warn(s"Couldn't find chat $chatId")
               messages.format("errors.chatNotFound")
             } { d ⇒
-              checkDriverFines(retrieveCookies, d, onlyNew = false)
-                .fold {
-                  logger.info(s"No fines were found for chat $chatId")
-                  messages.format("fines.empty")
-                } { finesResponse ⇒ // all fines go here
-                  logger.info(s"Something was found for $chatId: '$finesResponse'")
-                  finesResponse
-                }
+              Try(retrieveCookies)
+                .fold(
+                  err ⇒ {
+                    val errorId = UUID.randomUUID()
+                    logger.warn(s"Couldn't retrieve cookies for chat $chatId [$errorId]. $err")
+                    messages.format("errors.internal", errorId)
+                  },
+                  cookies ⇒ {
+                    checkDriverFines(cookies, d, onlyNew = false)
+                      .fold {
+                        logger.info(s"No fines were found for chat $chatId")
+                        messages.format("fines.empty")
+                      } { finesResponse ⇒ // all fines go here
+                        logger.info(s"Something was found for $chatId: '$finesResponse'")
+                        finesResponse
+                      }
+                  }
+                )
             })
         reply(botResponse)
       }).unsafeRunSync()
@@ -163,13 +173,13 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
       skipBots {
         val botResponse = getUserLocale
           .flatMap { implicit userLocale ⇒
-            msgText match {
+            msgText.map(_.toUpperCase) match {
               case Some(InputRegex(lastName, firstName, middleName, licenseSeries, licenseNumber)) ⇒
                 val driverInfo = DriverInfo(
                   id = chatId,
-                  fullName = s"$lastName $firstName $middleName".toUpperCase,
-                  licenseSeries = licenseSeries.toUpperCase,
-                  licenseNumber = licenseNumber.toUpperCase)
+                  fullName = s"$lastName $firstName $middleName",
+                  licenseSeries = licenseSeries,
+                  licenseNumber = licenseNumber)
                 dao.updateDriver(chatId, driverInfo).map(_.fold(
                   err ⇒ {
                     val errorId = UUID.randomUUID()

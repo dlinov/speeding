@@ -2,9 +2,9 @@ enablePlugins(DockerPlugin, JavaAppPackaging)
 
 name := "speeding"
 
-version := "0.5.2"
+version := "0.5.3"
 
-scalaVersion := "2.12.6"
+scalaVersion := "2.12.7"
 
 libraryDependencies ++= Seq(
   "ch.qos.logback" % "logback-classic" % "1.2.3",
