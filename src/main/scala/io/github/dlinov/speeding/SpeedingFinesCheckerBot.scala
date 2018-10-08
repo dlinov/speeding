@@ -56,25 +56,8 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
             _.fold {
               logger.warn(s"Couldn't find chat $chatId")
               messages.format("errors.chatNotFound")
-            } { d ⇒
-              Try(retrieveCookies)
-                .fold(
-                  err ⇒ {
-                    val errorId = UUID.randomUUID()
-                    logger.warn(s"Couldn't retrieve cookies for chat $chatId [$errorId]. $err")
-                    messages.format("errors.internal", errorId)
-                  },
-                  cookies ⇒ {
-                    checkDriverFines(cookies, d, onlyNew = false)
-                      .fold {
-                        logger.info(s"No fines were found for chat $chatId")
-                        messages.format("fines.empty")
-                      } { finesResponse ⇒ // all fines go here
-                        logger.info(s"Something was found for $chatId: '$finesResponse'")
-                        finesResponse
-                      }
-                  }
-                )
+            } {
+              performCheckForSingleDriver(chatId, _)
             })
         reply(botResponse)
       }).unsafeRunSync()
@@ -171,7 +154,7 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
     val chatId = msg.source
     if (msgText.forall(!_.startsWith(ToCommand.CommandPrefix))) {
       skipBots {
-        val botResponse = getUserLocale
+        val (saveUserResp, maybeCheckFinesResp) = getUserLocale
           .flatMap { implicit userLocale ⇒
             msgText.map(_.toUpperCase) match {
               case Some(InputRegex(lastName, firstName, middleName, licenseSeries, licenseNumber)) ⇒
@@ -184,18 +167,20 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
                   err ⇒ {
                     val errorId = UUID.randomUUID()
                     logger.warn(s"Couldn't update data for $chatId [$errorId]: ${err.message}")
-                    messages.format("errors.save.internal", errorId)
+                    messages.format("errors.save.internal", errorId) → None
                   },
                   _ ⇒ {
                     logger.info(s"Chat $chatId updated its data to $driverInfo")
-                    messages.format("data.saved")
+                    val checkFinesResp = performCheckForSingleDriver(chatId, driverInfo)
+                    messages.format("data.saved") → Some(checkFinesResp)
                   }))
               case _ ⇒
                 logger.warn(s"'$msgText' from $chatId didn't match input regex")
-                IO.pure(messages.format("errors.save.badrequest"))
+                IO.pure(messages.format("errors.save.badrequest") → None)
             }
           }.unsafeRunSync()
-        reply(botResponse)
+        reply(saveUserResp)
+        maybeCheckFinesResp.foreach(reply(_))
       }
     }
   }
@@ -221,6 +206,27 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
       }
   }
   /*_*/
+
+  def performCheckForSingleDriver(chatId: Long, driverInfo: DriverInfo)(implicit locale: Locale): String = {
+    Try(retrieveCookies)
+      .fold(
+        err ⇒ {
+          val errorId = UUID.randomUUID()
+          logger.warn(s"Couldn't retrieve cookies for chat $chatId [$errorId]. $err")
+          messages.format("errors.internal", errorId)
+        },
+        cookies ⇒ {
+          checkDriverFines(cookies, driverInfo, onlyNew = false)
+            .fold {
+              logger.info(s"No fines were found for chat $chatId")
+              messages.format("fines.empty")
+            } { finesResponse ⇒ // all fines go here
+              logger.info(s"Something was found for $chatId: '$finesResponse'")
+              finesResponse
+            }
+        }
+      )
+  }
 
   private def sendMessageTo(chatId: Long, text: String): Future[Message] = {
     request(SendMessage(chatId, text))
@@ -259,6 +265,10 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
     }).toOption.flatten
   }
 
+  private def retrieveCookies: IndexedSeq[HttpCookie] = {
+    SessionCookieReq.asString.cookies
+  }
+
   private def skipBots(action: ⇒ Unit)(implicit msg: Message): Unit = {
     msg.from.foreach(user ⇒ {
       if (!user.isBot) {
@@ -292,10 +302,6 @@ object SpeedingFinesCheckerBot {
     SpeedingBaseCheckReq
       .cookies(cookies)
       .postData(json)
-  }
-
-  private def retrieveCookies: IndexedSeq[HttpCookie] = {
-    SessionCookieReq.asString.cookies
   }
 
   private def getUserId(user: User): String = user.username.map("@" + _).getOrElse(user.id.toString)
