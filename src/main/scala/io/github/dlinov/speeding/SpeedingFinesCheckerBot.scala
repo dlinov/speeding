@@ -101,6 +101,32 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
     }
   }
 
+  onCommandWithHelp('profile)("bot.description.profile") { implicit msg ⇒
+    skipBots {
+      val chatId = msg.source
+      logger.info(s"Chat $chatId asked to show profile data")
+      (for {
+        explicitUserLocale ← getUserLocale
+        profileResp ← dao.findDriver(chatId)
+      } yield {
+        implicit val userLocale: Locale = explicitUserLocale
+        profileResp
+          .fold(
+            err ⇒ {
+              val errorId = UUID.randomUUID()
+              logger.error(s"Couldn't check db for chat $chatId [$errorId]: ${err.message}")
+              reply(messages.format("errors.internal", errorId))
+            },
+            _.fold {
+              logger.warn(s"Couldn't find chat $chatId")
+              reply(messages.format("errors.chatNotFound"))
+            } { u ⇒
+              reply(s"${u.licenseSeries} ${u.licenseNumber}")
+            })
+      }).unsafeRunSync()
+    }
+  }
+
   onCallbackQuery { implicit callbackQuery ⇒
     logger.debug(s"cbq: $callbackQuery}")
     // You must acknowledge callback queries, even if there's no response.
