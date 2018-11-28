@@ -14,7 +14,7 @@ import cats.syntax.functor._
 import cats.syntax.semigroup._
 import cats.syntax.traverse._
 import info.mukel.telegrambot4s.api.declarative.{Callbacks, Commands, ToCommand}
-import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
+import info.mukel.telegrambot4s.api.{Polling, TelegramApiException, TelegramBot}
 import info.mukel.telegrambot4s.methods.SendMessage
 import info.mukel.telegrambot4s.models._
 import io.github.dlinov.speeding.dao.{Dao, DaoProvider}
@@ -198,7 +198,9 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
             .map { user ⇒
               checkDriverFines(cookies, driver, onlyNew = true)(user.locale)
                 .map(sendMessageTo(userId, _))
-            }.void
+            }
+            .map(_.toRight("Message was not sent, see logs"))
+            .void
           }
         }
         value.flatMap(_.leftMap(_.message).flatTraverse(_.traverse[IOEitherS, Unit](identity)))
@@ -228,8 +230,19 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
       )
   }
 
-  private def sendMessageTo(chatId: Long, text: String): Future[Message] = {
+  private def sendMessageTo(chatId: Long, text: String): Future[Option[Message]] = {
     request(SendMessage(chatId, text))
+      .map[Option[Message]](Some(_))
+      .recover {
+        case TelegramApiException(message, errorCode, maybeCause, _) ⇒
+          val preparedErrorMessage = s"Couldn't send message '$text' to chat $chatId: $message [$errorCode]"
+          maybeCause.fold {
+            logger.warn(preparedErrorMessage)
+          } { cause ⇒
+            logger.warn(s"$preparedErrorMessage. Inner error: ", cause)
+          }
+          None
+      }
   }
 
   private def checkDriverFines(

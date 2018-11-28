@@ -102,20 +102,20 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
           .query[DriverInfo]
           .option)
     } yield {
-      logger.debug(s"Find by id=$id: $maybeDriver")
+      logger.debug(s"Find driver by id=$id: $maybeDriver")
       maybeDriver
     }).value.transact(xa)
   }
 
   override def findUser(id: Long): DaoResp[Option[BotUser]] = {
     (for {
-      maybeDriver ← EitherT.right(
+      maybeUser ← EitherT.right(
         sql"SELECT id, lang FROM bot_users WHERE id = $id"
           .query[BotUser]
           .option)
     } yield {
-      logger.debug(s"Find by id=$id: $maybeDriver")
-      maybeDriver
+      logger.debug(s"Find user by id=$id: $maybeUser")
+      maybeUser
     }).value.transact(xa)
   }
 
@@ -160,13 +160,13 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
 
   override def findFine(id: Long): DaoResp[Option[Fine]] = {
     (for {
-      maybeDriver ← EitherT.right(
+      maybeFine ← EitherT.right(
         sql"SELECT id, driver_id, date_time, is_active FROM fines WHERE id = $id"
           .query[Fine]
           .option)
     } yield {
-      logger.debug(s"Find by id=$id: $maybeDriver")
-      maybeDriver
+      logger.debug(s"Find fine by id=$id: $maybeFine")
+      maybeFine
     }).value.transact(xa)
   }
 
