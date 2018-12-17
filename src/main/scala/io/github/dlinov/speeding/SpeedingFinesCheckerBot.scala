@@ -13,10 +13,12 @@ import cats.syntax.either._
 import cats.syntax.functor._
 import cats.syntax.semigroup._
 import cats.syntax.traverse._
-import info.mukel.telegrambot4s.api.declarative.{Callbacks, Commands, ToCommand}
-import info.mukel.telegrambot4s.api.{Polling, TelegramBot}
-import info.mukel.telegrambot4s.methods.SendMessage
-import info.mukel.telegrambot4s.models._
+import com.bot4s.telegram.api.{Polling, RequestHandler, TelegramBot}
+import com.bot4s.telegram.api.declarative.{Callbacks, Commands}
+import com.bot4s.telegram.clients.SttpClient
+import com.bot4s.telegram.methods.SendMessage
+import com.bot4s.telegram.models.{InlineKeyboardButton, InlineKeyboardMarkup, Message, User}
+import com.softwaremill.sttp.SttpBackend
 import io.github.dlinov.speeding.dao.{Dao, DaoProvider}
 import io.github.dlinov.speeding.model.DriverInfo
 import io.github.dlinov.speeding.model.parser.ResponseParser
@@ -25,10 +27,12 @@ import scalaj.http._
 import scala.concurrent.Future
 import scala.util.Try
 
-class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
+class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
+                             (implicit backend: SttpBackend[Future, Nothing])
   extends TelegramBot with Commands with Polling with Callbacks with DaoProvider with Localized with LocalizedHelp {
 
   import SpeedingFinesCheckerBot._
+  override val client: RequestHandler = new SttpClient(token)
 
   type EitherS[A] = Either[String, A]
   type IOEitherS[A] = IO[EitherS[A]]
@@ -37,7 +41,7 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
   private val ioEitherFunctor = Functor[IO] compose Functor[dao.DaoEither]
   private val ioEitherListFunctor = ioEitherFunctor compose Functor[List]
 
-  onCommandWithHelp('forcecheck)("bot.description.forcecheck") { implicit msg ⇒
+  onCommandWithHelp("forcecheck")("bot.description.forcecheck") { implicit msg ⇒
     skipBots {
       val chatId = msg.source
       logger.info(s"Chat $chatId asked to check its fines")
@@ -64,7 +68,7 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
     }
   }
 
-  onCommandWithHelp('lang)("bot.description.updLang") { implicit msg ⇒
+  onCommandWithHelp("lang")("bot.description.updLang") { implicit msg ⇒
     skipBots {
       val chatId = msg.source
       logger.info(s"Chat $chatId asked to change bot language")
@@ -127,7 +131,7 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
     }
   }
 
-  onCommandWithHelp('stop, 'delete, 'remove)("bot.description.removeData") { implicit msg ⇒
+  onCommandWithHelp("stop", "delete", "remove")("bot.description.removeData") { implicit msg ⇒
     skipBots {
       val chatId = msg.source
       logger.info(s"Chat $chatId asked to remove driver data")
@@ -152,7 +156,7 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
   onMessage { implicit msg ⇒
     val msgText = msg.text
     val chatId = msg.source
-    if (msgText.forall(!_.startsWith(ToCommand.CommandPrefix))) {
+    if (msgText.forall(!_.startsWith("/"))) {
       skipBots {
         val (saveUserResp, maybeCheckFinesResp) = getUserLocale
           .flatMap { implicit userLocale ⇒

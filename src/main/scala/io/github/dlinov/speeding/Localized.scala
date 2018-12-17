@@ -3,7 +3,7 @@ package io.github.dlinov.speeding
 import java.util.Locale
 
 import cats.effect.IO
-import info.mukel.telegrambot4s.models.Message
+import com.bot4s.telegram.models.Message
 import io.github.dlinov.speeding.dao.DaoProvider
 import org.jmotor.i18n.Messages
 

@@ -2,15 +2,13 @@ package io.github.dlinov.speeding
 
 import java.util.Locale
 
-import info.mukel.telegrambot4s.api.declarative.{Action, Commands, ToCommand}
-import info.mukel.telegrambot4s.Implicits._
-import info.mukel.telegrambot4s.models.Message
+import com.bot4s.telegram.api.declarative._
+import com.bot4s.telegram.Implicits._
+import com.bot4s.telegram.models.Message
 
 import scala.collection.mutable.ArrayBuffer
 
-// rewritten version of info.mukel.telegrambot4s.api.declarative.Help with support of localizing the help
-trait LocalizedHelp extends Commands { self: Localized ⇒
-  def listAllCommandsInHelp: Boolean = true
+trait LocalizedHelp { self: Commands with Localized ⇒
 
   private case class CommandDescription(variants    : Seq[String],
                                         description : String,
@@ -19,20 +17,14 @@ trait LocalizedHelp extends Commands { self: Localized ⇒
 
   private val commandsDescription = ArrayBuffer[CommandDescription]()
 
-  def onCommandWithHelp[T : ToCommand](commands: T*)
-                                      (description: String, category: Option[String] = None, helpHandler : Option[Action[Message]] = None)
-                                      (action: Action[Message]): Unit = {
-    super.onCommand(commands : _*)(action)
-    val toCommandImpl = implicitly[ToCommand[T]]
-    val variants = commands.map(toCommandImpl.apply)
-    commandsDescription += CommandDescription(variants, description, category, helpHandler)
-  }
-
-  abstract override def onCommand[T : ToCommand](commands: T*)(action: Action[Message]): Unit = {
-    if (listAllCommandsInHelp)
-      onCommandWithHelp(commands : _*)("no.description")(action)
-    else
-      super.onCommand(commands: _*)(action)
+  def onCommandWithHelp(filters: String*)
+                        (description: String,
+                         category: Option[String] = None,
+                         helpHandler : Option[Action[Message]] = None)
+                        (action: Action[Message]): Unit = {
+    val filter = HintedCommandFilterMagnet(filters: _*)
+    onCommand(filter)(action)
+    commandsDescription += CommandDescription(filters, description, category, helpHandler)
   }
 
   def helpHeader()(implicit locale: Locale): String = messages.format("help.header")
@@ -50,7 +42,7 @@ trait LocalizedHelp extends Commands { self: Localized ⇒
           group.map {
             cmd =>
               val variants = cmd.variants.map("/" + _).mkString("|")
-              variants.md + " - " + messages.format(cmd.description)
+              variants.mdEscape + " - " + messages.format(cmd.description)
           }.mkString("\n")
     }.mkString("\n\n")
     allCommands
@@ -69,7 +61,7 @@ trait LocalizedHelp extends Commands { self: Localized ⇒
   }
 
   // TODO: call getUserLocale only once
-  onCommandWithHelp('help)("help.description", helpHandler = Some(msg ⇒ helpHelp(msg, getUserLocale(msg).unsafeRunSync()))) {
+  onCommandWithHelp("help")("help.description", helpHandler = Some(msg ⇒ helpHelp(msg, getUserLocale(msg).unsafeRunSync()))) {
     implicit msg =>
       implicit val locale: Locale = getUserLocale.unsafeRunSync()
       withArgs {

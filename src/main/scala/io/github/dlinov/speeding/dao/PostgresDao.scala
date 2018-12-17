@@ -8,7 +8,9 @@ import io.github.dlinov.speeding.dao.Dao.DaoError
 import io.github.dlinov.speeding.model.{BotUser, DriverInfo, Fine}
 import org.slf4j.LoggerFactory
 
-class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
+class PostgresDao(dbUri: String, user: String, password: String)
+                 (implicit cs: ContextShift[IO])
+  extends Dao {
 
   import PostgresDao._
 
