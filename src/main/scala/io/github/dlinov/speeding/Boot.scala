@@ -2,6 +2,8 @@ package io.github.dlinov.speeding
 
 import java.net.URI
 
+import cats.effect.{ContextShift, IO}
+import cats.effect.internals.IOContextShift
 import com.typesafe.config.ConfigFactory
 import io.github.dlinov.speeding.dao.{Dao, PostgresDao}
 import org.slf4j.LoggerFactory
@@ -20,6 +22,7 @@ object Boot extends App {
 
   private val logger = LoggerFactory.getLogger(this.getClass)
   private val config = ConfigFactory.load()
+  private implicit val contextShift: ContextShift[IO] = IOContextShift.global
 
   // Fetch the token from an environment variable or untracked file.
   private val token = Try(config.getString("bot.token"))
@@ -37,7 +40,9 @@ object Boot extends App {
   private val dao: Dao = new PostgresDao(dbUrl, user, password)
   dao.createSchemaIfMissing().unsafeRunSync()
 
-  private val bot = new SpeedingFinesCheckerBot(token, dao)
+  private val tessDataPath = config.getString("tesseract.datapath")
+
+  private val bot = new SpeedingFinesCheckerBot(token, dao, tessDataPath)
   private val botScheduler = bot.system.scheduler
   private implicit val botExecutionContext: ExecutionContext = bot.executionContext
 

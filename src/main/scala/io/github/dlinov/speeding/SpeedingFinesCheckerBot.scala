@@ -1,8 +1,10 @@
 package io.github.dlinov.speeding
 
 import java.net.HttpCookie
+import java.nio.file.{Files, Paths}
 import java.util.{Locale, UUID}
 
+import cats.data.EitherT
 import cats.{Applicative, Functor}
 import cats.effect.IO
 import cats.instances.either._
@@ -15,27 +17,38 @@ import cats.syntax.semigroup._
 import cats.syntax.traverse._
 import info.mukel.telegrambot4s.api.declarative.{Callbacks, Commands, ToCommand}
 import info.mukel.telegrambot4s.api.{Polling, TelegramApiException, TelegramBot}
-import info.mukel.telegrambot4s.methods.SendMessage
+import info.mukel.telegrambot4s.methods.{GetFile, SendMessage}
 import info.mukel.telegrambot4s.models._
 import io.github.dlinov.speeding.dao.{Dao, DaoProvider}
 import io.github.dlinov.speeding.model.DriverInfo
 import io.github.dlinov.speeding.model.parser.ResponseParser
+import net.sourceforge.tess4j.Tesseract
 import scalaj.http._
 
 import scala.concurrent.Future
 import scala.util.Try
 
-class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
+class SpeedingFinesCheckerBot(
+                                 override val token: String,
+                                 override val dao: Dao,
+                                 tessDataPath: String)
   extends TelegramBot with Commands with Polling with Callbacks with DaoProvider with Localized with LocalizedHelp {
 
   import SpeedingFinesCheckerBot._
 
   type EitherS[A] = Either[String, A]
   type IOEitherS[A] = IO[EitherS[A]]
+  type Rs = (String, Option[String])
   implicit val applicative: Applicative[IOEitherS] = Applicative[IO] compose Applicative[EitherS]
 
   private val ioEitherFunctor = Functor[IO] compose Functor[dao.DaoEither]
   private val ioEitherListFunctor = ioEitherFunctor compose Functor[List]
+  private val tess: Tesseract = {
+    val t = new Tesseract()
+    t.setDatapath(tessDataPath)
+    t.setLanguage("rus")
+    t
+  }
 
   onCommandWithHelp('forcecheck)("bot.description.forcecheck") { implicit msg ⇒
     skipBots {
@@ -121,7 +134,7 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
               logger.warn(s"Couldn't find chat $chatId")
               reply(messages.format("errors.chatNotFound"))
             } { u ⇒
-              reply(s"${u.licenseSeries} ${u.licenseNumber}")
+              reply(s"${u.fullName}\n${u.licenseSeries} ${u.licenseNumber}")
             })
       }).unsafeRunSync()
     }
@@ -180,33 +193,31 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
     val chatId = msg.source
     if (msgText.forall(!_.startsWith(ToCommand.CommandPrefix))) {
       skipBots {
-        val (saveUserResp, maybeCheckFinesResp) = getUserLocale
-          .flatMap { implicit userLocale ⇒
-            msgText.map(_.toUpperCase) match {
-              case Some(InputRegex(lastName, firstName, middleName, licenseSeries, licenseNumber)) ⇒
-                val driverInfo = DriverInfo(
-                  id = chatId,
-                  fullName = s"$lastName $firstName $middleName",
-                  licenseSeries = licenseSeries,
-                  licenseNumber = licenseNumber)
-                dao.updateDriver(chatId, driverInfo).map(_.fold(
-                  err ⇒ {
-                    val errorId = UUID.randomUUID()
-                    logger.warn(s"Couldn't update data for $chatId [$errorId]: ${err.message}")
-                    messages.format("errors.save.internal", errorId) → None
-                  },
-                  _ ⇒ {
-                    logger.info(s"Chat $chatId updated its data to $driverInfo")
-                    val checkFinesResp = performCheckForSingleDriver(chatId, driverInfo)
-                    messages.format("data.saved") → Some(checkFinesResp)
-                  }))
-              case _ ⇒
-                logger.warn(s"'$msgText' from $chatId didn't match input regex")
-                IO.pure(messages.format("errors.save.badrequest") → None)
-            }
-          }.unsafeRunSync()
-        reply(saveUserResp)
-        maybeCheckFinesResp.foreach(reply(_))
+        val (updDataResp, maybeFinesResp) = (for {
+          locale ← EitherT.liftF(getUserLocale)
+          driverInfo ← msg.photo.fold {
+            EitherT(IO(parseText(msgText, chatId)(locale)))
+          } {
+            parsePhotos(_, chatId)(locale)
+          }
+          replies ← EitherT {
+            dao.updateDriver(chatId, driverInfo).map(_.fold[Either[Rs, Rs]](
+              err ⇒ {
+                val errorId = UUID.randomUUID()
+                logger.warn(s"Couldn't update data for $chatId [$errorId]: ${err.message}")
+                Either.left[Rs, Rs](messages.format("errors.save.internal", errorId)(locale) → None)
+              },
+              _ ⇒ {
+                logger.info(s"Chat $chatId updated its data to $driverInfo")
+                val checkFinesResp = performCheckForSingleDriver(chatId, driverInfo)(locale)
+                Either.right[Rs, Rs](messages.format("data.saved")(locale) → Some(checkFinesResp))
+              }))
+          }
+        } yield {
+          replies
+        }).value.unsafeRunSync().merge
+        reply(updDataResp)
+        maybeFinesResp.foreach(reply(_))
       }
     }
   }
@@ -318,9 +329,120 @@ class SpeedingFinesCheckerBot(override val token: String, override val dao: Dao)
     })
   }
 
+  private def parseText(msgText: Option[String], chatId: Long)
+                       (implicit locale: Locale): Either[(String, Option[String]), DriverInfo] = {
+    msgText.map(_.toUpperCase) match {
+      case Some(InputRegex(lastName, firstName, middleName, licenseSeries, licenseNumber)) ⇒
+        Right(DriverInfo(
+          id = chatId,
+          fullName = s"$lastName $firstName $middleName",
+          licenseSeries = licenseSeries,
+          licenseNumber = licenseNumber))
+      case _ ⇒
+        Left {
+          logger.warn(s"'$msgText' from $chatId didn't match input regex")
+          messages.format("errors.save.badrequest") → None
+        }
+    }
+  }
+
+  private def parsePhotos(photos: Seq[PhotoSize], chatId: Long)
+                         (implicit locale: Locale): EitherT[IO, (String, Option[String]), DriverInfo] = {
+    for {
+      bestFileId ← EitherT.liftF(IO(photos.maxBy(_.width).fileId))
+      fileInfo ← EitherT.liftF(IO.fromFuture(IO(client(GetFile(bestFileId)))))
+      filePath ← EitherT(IO(fileInfo.filePath
+        .toRight {
+          val errorId = UUID.randomUUID()
+          logger.warn(s"Failed to get file $bestFileId from telegram [$errorId]: empty path")
+          messages.format("errors.save.internal", errorId) → None
+        }))
+      fileResponse ← EitherT(IO {
+        import cats.syntax.either._
+        Try(fileRequest(token, filePath).asBytes)
+          .toEither
+          .leftMap { exc ⇒
+            val errorId = UUID.randomUUID()
+            logger.warn(s"Failed to get file $bestFileId from telegram [$errorId]", exc)
+            messages.format("errors.save.internal", errorId) → None
+          }
+      })
+      fileBytes ← EitherT(IO {
+        if (fileResponse.isSuccess) {
+          Right(fileResponse.body)
+        } else {
+          val errorId = UUID.randomUUID()
+          logger.warn(s"Failed to get file $bestFileId from telegram [$errorId]: $fileResponse")
+          Left(messages.format("errors.save.internal", errorId) → None)
+        }
+      })
+      ocrData ← EitherT(IO {
+        val fileName = Paths.get(filePath).toFile.getName
+        val tmpFilePath = Files.createTempFile(s"${chatId}_vid_", s"_$fileName")
+        Files.write(tmpFilePath, fileBytes)
+        val ocrResult = Try(tess.doOCR(tmpFilePath.toFile))
+        Files.delete(tmpFilePath)
+        logger.debug(s"OCR result for $chatId:\n$ocrResult")
+        ocrResult.toEither
+          .leftMap { exc ⇒
+            val errorId = UUID.randomUUID()
+            logger.warn(s"OCR error [$errorId]:", exc)
+            messages.format("errors.save.internal", errorId) → None
+          }
+      })
+      driverInfo ← EitherT(IO {
+        val lines = ocrData
+          .split("\n")
+          .map(_
+            .replace(" :", "")
+            .replace(" °", "")
+            .replace(" #", "")
+            .trim)
+          .filter(_.nonEmpty)
+        val ownerIdx = lines.indexWhere(_.startsWith("УЛАСНИК"))
+        val addressIdx = lines.indexWhere(_.startsWith("АДРАС:"))
+        if (ownerIdx > -1 && addressIdx > -1) {
+          (for {
+            venicleId ← lines.take(ownerIdx)
+              .flatMap(VenicleIdRegex.findFirstMatchIn)
+              .headOption
+              .map { m ⇒ m.group(1) → m.group(2) }
+            owner ← {
+              val nameLines = lines
+                .slice(ownerIdx + 1, addressIdx)
+                .zipWithIndex
+                .filter(_._2 % 2 == 0)
+                .take(3)
+              if (nameLines.length == 3) {
+                Some(s"${nameLines(0)._1} ${nameLines(1)._1} ${nameLines(2)._1}")
+              } else {
+                None
+              }
+            }
+          } yield {
+            DriverInfo(
+              id = chatId,
+              fullName = owner,
+              licenseSeries = venicleId._1,
+              licenseNumber = venicleId._2)
+          }).toRight[(String, Option[String])] {
+              val errorId = UUID.randomUUID()
+              logger.warn(s"Failed to recognize data from photo [$errorId]")
+              messages.format("errors.save.internal", errorId) → None
+          }
+        } else {
+          val errorId = UUID.randomUUID()
+          logger.warn(s"Failed to recognize data from photo [$errorId]")
+          Left(messages.format("errors.save.internal", errorId) → None)
+        }
+      })
+    } yield driverInfo
+  }
+
 }
 
 object SpeedingFinesCheckerBot {
+  private final val VenicleIdRegex = """([А-Я]{3})\s*([0-9]{7})""".r
   private final val InputRegex =
     """^([А-Я]{1,32})\s*([А-Я]{1,32})\s*([А-Я]{1,32})\s*([А-Я]{3})\s*([0-9]{7})\s*$""".r
 
@@ -341,6 +463,11 @@ object SpeedingFinesCheckerBot {
     SpeedingBaseCheckReq
       .cookies(cookies)
       .postData(json)
+  }
+
+  private def fileRequest(token: String, path: String): HttpRequest = {
+    Http(s"https://api.telegram.org/file/bot$token/$path")
+      .method("GET")
   }
 
   private def getUserId(user: User): String = user.username.map("@" + _).getOrElse(user.id.toString)

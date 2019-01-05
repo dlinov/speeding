@@ -4,11 +4,12 @@ import cats.data.EitherT
 import cats.effect._
 import doobie._
 import doobie.implicits._
-import io.github.dlinov.speeding.dao.Dao.DaoError
+import io.github.dlinov.speeding.dao.Dao.{DaoError, GenericDaoError}
 import io.github.dlinov.speeding.model.{BotUser, DriverInfo, Fine}
 import org.slf4j.LoggerFactory
 
-class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
+class PostgresDao(dbUri: String, user: String, password: String)
+                 (implicit contextShift: ContextShift[IO]) extends Dao {
 
   import PostgresDao._
 
@@ -114,7 +115,7 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
           .query[BotUser]
           .option)
     } yield {
-      logger.debug(s"Find user by id=$id: $maybeUser")
+      logger.trace(s"Find user by id=$id: $maybeUser")
       maybeUser
     }).value.transact(xa)
   }
@@ -177,7 +178,9 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
           .query[Fine]
           .to[List])
     } yield {
-      logger.debug(s"Find driver $driverId fines results: $all")
+      all.foreach { fine ⇒
+        logger.info(s"Fine (active=${fine.isActive}) was found for driver $driverId: ${fine.toHumanString}")
+      }
       all
     }).value.transact(xa)
   }
@@ -190,7 +193,9 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
           .query[Fine]
           .to[List])
     } yield {
-      logger.debug(s"Find driver $driverId fines results: $all")
+      all.foreach { fine ⇒
+        logger.info(s"Fine (active=${fine.isActive}) was found for driver $driverId: ${fine.toHumanString}")
+      }
       all
     }).value.transact(xa)
   }
@@ -222,13 +227,17 @@ class PostgresDao(dbUri: String, user: String, password: String) extends Dao {
 
   override def deleteUserData(userId: Long): DaoResp[Unit] = {
     (for {
-      _ ← EitherT.right[DaoError](sql"DELETE FROM fines WHERE driver_id = $userId;".update.run)
-      _ ← EitherT.right[DaoError](sql"DELETE FROM drivers WHERE id = $userId;".update.run)
-      _ ← EitherT.right[DaoError](sql"DELETE FROM bot_users WHERE id = $userId;".update.run)
+      _ ← EitherT(sql"DELETE FROM fines WHERE driver_id = $userId;".update.run.attemptSql)
+      _ ← EitherT(sql"DELETE FROM drivers WHERE id = $userId;".update.run.attemptSql)
+      _ ← EitherT(sql"DELETE FROM bot_users WHERE id = $userId;".update.run.attemptSql)
     } yield {
       logger.debug(s"User $userId info was removed from db")
       ()
-    }).value.transact(xa)
+    }).leftMap { exc ⇒
+        logger.warn(s"Failed to clean data for user $userId", exc)
+        new GenericDaoError(exc.getMessage)
+      }
+      .value.transact(xa)
   }
 }
 

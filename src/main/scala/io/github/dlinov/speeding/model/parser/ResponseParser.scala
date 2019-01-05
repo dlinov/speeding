@@ -31,7 +31,7 @@ object ResponseParser {
         val maybeNoFines = doc.\("h2").headOption
         maybeNoFines match {
           case Some(n) if n.text.contains("информация не найдена") ⇒
-            logger.debug("No fines, congratulations!")
+            logger.trace("No fines, congratulations!")
             Right(Seq.empty)
           case _ ⇒
             val finesTableRows = doc.\("table").\("tr")
