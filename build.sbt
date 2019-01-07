@@ -43,7 +43,6 @@ scalacOptions ++= Seq(
 dockerBaseImage := "openjdk:11-jre-slim"
 
 assemblyMergeStrategy in assembly := {
-  case PathList("javax", "servlet", xs @ _*)         ⇒ MergeStrategy.first
   case PathList(ps @ _*) if ps.last endsWith ".html" ⇒ MergeStrategy.first
   case "application.conf"                            ⇒ MergeStrategy.concat
   case x if x endsWith ".txt"                        ⇒ MergeStrategy.discard

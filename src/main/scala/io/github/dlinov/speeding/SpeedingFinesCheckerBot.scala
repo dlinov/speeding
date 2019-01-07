@@ -46,7 +46,7 @@ class SpeedingFinesCheckerBot(
   private val tess: Tesseract = {
     val t = new Tesseract()
     t.setDatapath(tessDataPath)
-    t.setLanguage("rus")
+    t.setLanguage("rus+bel") // tesseract 4 works well with rus only
     t
   }
 
@@ -397,13 +397,16 @@ class SpeedingFinesCheckerBot(
             .replace(" :", "")
             .replace(" °", "")
             .replace(" #", "")
+            .replace(" _", "")
+            .replace(" /", "")
             .trim)
           .filter(_.nonEmpty)
-        val ownerIdx = lines.indexWhere(_.startsWith("УЛАСНИК"))
+          .map(_.toUpperCase)
+        val ownerIdx = lines.indexWhere(_.startsWith("УЛАСНІК"))
         val addressIdx = lines.indexWhere(_.startsWith("АДРАС:"))
         if (ownerIdx > -1 && addressIdx > -1) {
           (for {
-            venicleId ← lines.take(ownerIdx)
+            vehicleId ← lines.take(ownerIdx)
               .flatMap(VenicleIdRegex.findFirstMatchIn)
               .headOption
               .map { m ⇒ m.group(1) → m.group(2) }
@@ -423,8 +426,8 @@ class SpeedingFinesCheckerBot(
             DriverInfo(
               id = chatId,
               fullName = owner,
-              licenseSeries = venicleId._1,
-              licenseNumber = venicleId._2)
+              licenseSeries = vehicleId._1,
+              licenseNumber = vehicleId._2)
           }).toRight[(String, Option[String])] {
               val errorId = UUID.randomUUID()
               logger.warn(s"Failed to recognize data from photo [$errorId]")
