@@ -16,8 +16,8 @@ trait Localized { self: DaoProvider ⇒
       .flatMap(_.split("-").headOption.map(new Locale(_)))
       .getOrElse(Localized.DefaultLocale)
     dao
-    .findUser(msg.source)
-    .map(_.toOption.flatMap(_.map(_.locale)).getOrElse(tgLang))
+      .findUser(msg.source)
+      .map(_.toOption.flatMap(_.map(_.locale)).getOrElse(tgLang))
   }
 }
 

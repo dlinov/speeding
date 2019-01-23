@@ -8,60 +8,67 @@ import io.github.dlinov.speeding.dao.Dao.DaoError
 import io.github.dlinov.speeding.model.{BotUser, DriverInfo, Fine}
 import org.slf4j.LoggerFactory
 
-class PostgresDao(dbUri: String, user: String, password: String)
-                 (implicit cs: ContextShift[IO])
-  extends Dao {
+class PostgresDao(dbUri: String, user: String, password: String)(implicit cs: ContextShift[IO])
+    extends Dao {
 
   import PostgresDao._
 
   private val logger = LoggerFactory.getLogger(classOf[PostgresDao])
 
   private val xa = {
-    Transactor.fromDriverManager[IO](
-      "org.postgresql.Driver",
-      dbUri,
-      user,
-      password)
+    Transactor.fromDriverManager[IO]("org.postgresql.Driver", dbUri, user, password)
   }
 
-  override def createSchemaIfMissing(): IO[Int] = {
+  override def createSchemaIfMissing(): IO[Int] =
     // check if table `fines` exists
-    qCountFines.query[Int].unique.transact(xa).attemptSql
-      .flatMap(_.fold(
-        // table `fines` does not exist, create it
-        _ ⇒ {
-          // check if table `drivers` exists
-          qCountDrivers.query[Int].unique.transact(xa).attemptSql
-            .flatMap(sqlResp ⇒ {
-              // table `drivers` does not exist, create it
-              val runCreateFinesTable = qCreateFinesTable.update.run
-              sqlResp
-                .fold(
-                  _ ⇒ {
+    qCountFines
+      .query[Int]
+      .unique
+      .transact(xa)
+      .attemptSql
+      .flatMap(
+        _.fold(
+          // table `fines` does not exist, create it
+          _ ⇒ {
+            // check if table `drivers` exists
+            qCountDrivers
+              .query[Int]
+              .unique
+              .transact(xa)
+              .attemptSql
+              .flatMap(sqlResp ⇒ {
+                // table `drivers` does not exist, create it
+                val runCreateFinesTable = qCreateFinesTable.update.run
+                sqlResp
+                  .fold(_ ⇒ {
                     for {
                       _ ← qCreateDriversTable.update.run
                       _ ← runCreateFinesTable
                     } yield 0
-                  },
-                  _ ⇒ runCreateFinesTable)
-                .transact(xa)
-            })
-        },
-        // table `fines` exists, db is at least v2
-        _ ⇒ {
-          qCountUsers.query[Int].unique.transact(xa).attemptSql
-            .flatMap(_.fold(
+                  }, _ ⇒ runCreateFinesTable)
+                  .transact(xa)
+              })
+          },
+          // table `fines` exists, db is at least v2
+          _ ⇒ {
+            qCountUsers
+              .query[Int]
+              .unique
+              .transact(xa)
+              .attemptSql
+              .flatMap(_.fold(
                 // no table `bot_users`create it it
-                _ ⇒ (for {
-                  _ ← qCreateUsersTable.update.run
-                  _ ← qPopulateUsersTable.update.run
-                  _ ← qDropDriversLangColumn.update.run
-                } yield 0).transact(xa),
+                _ ⇒
+                  (for {
+                    _ ← qCreateUsersTable.update.run
+                    _ ← qPopulateUsersTable.update.run
+                    _ ← qDropDriversLangColumn.update.run
+                  } yield 0).transact(xa),
                 // table `bot_users` exists
                 _ ⇒ IO.pure(0)
               ))
-        }))
-  }
+          }
+        ))
 
   override def updateDriver(userId: Long, driverInfo: DriverInfo): DaoResp[DriverInfo] = {
     val fn = driverInfo.fullName
@@ -71,33 +78,35 @@ class PostgresDao(dbUri: String, user: String, password: String)
       maybeExisting ← sql"SELECT id FROM drivers WHERE id = $userId"
         .query[Int]
         .option
-      updResult ← maybeExisting.fold {
-        sql"INSERT INTO drivers (id, full_name, license_series, license_number) VALUES ($userId, $fn, $ls, $ln)"
-      } { _ ⇒
-        sql"UPDATE drivers SET full_name = $fn, license_series = $ls, license_number = $ln WHERE id = $userId"
-      }.update.run
+      updResult ← maybeExisting
+        .fold {
+          sql"INSERT INTO drivers (id, full_name, license_series, license_number) VALUES ($userId, $fn, $ls, $ln)"
+        } { _ ⇒
+          sql"UPDATE drivers SET full_name = $fn, license_series = $ls, license_number = $ln WHERE id = $userId"
+        }
+        .update
+        .run
     } yield {
       logger.debug(s"Update result: $updResult")
       Right(driverInfo): Either[DaoError, DriverInfo]
     }).transact(xa)
   }
 
-  override def updateUser(userId: Long, lang: String): DaoResp[BotUser] = {
+  override def updateUser(userId: Long, lang: String): DaoResp[BotUser] =
     (for {
-      existing ← EitherT.fromOptionF(sql"SELECT id, lang FROM bot_users WHERE id = $userId"
-        .query[BotUser]
-        .option, error(s"No user id=$userId found"))
+      existing ← EitherT.fromOptionF(
+        sql"SELECT id, lang FROM bot_users WHERE id = $userId"
+          .query[BotUser]
+          .option,
+        error(s"No user id=$userId found"))
       _ ← EitherT.right[DaoError] {
-        sql"UPDATE bot_users SET lang = $lang WHERE id = $userId;"
-          .update
-          .run
+        sql"UPDATE bot_users SET lang = $lang WHERE id = $userId;".update.run
       }
     } yield {
       existing.copy(lang = lang)
     }).value.transact(xa)
-  }
 
-  override def findDriver(id: Long): DaoResp[Option[DriverInfo]] = {
+  override def findDriver(id: Long): DaoResp[Option[DriverInfo]] =
     (for {
       maybeDriver ← EitherT.right(
         sql"SELECT id, full_name, license_series, license_number FROM drivers WHERE id = $id"
@@ -107,9 +116,8 @@ class PostgresDao(dbUri: String, user: String, password: String)
       logger.debug(s"Find by id=$id: $maybeDriver")
       maybeDriver
     }).value.transact(xa)
-  }
 
-  override def findUser(id: Long): DaoResp[Option[BotUser]] = {
+  override def findUser(id: Long): DaoResp[Option[BotUser]] =
     (for {
       maybeDriver ← EitherT.right(
         sql"SELECT id, lang FROM bot_users WHERE id = $id"
@@ -119,48 +127,44 @@ class PostgresDao(dbUri: String, user: String, password: String)
       logger.debug(s"Find by id=$id: $maybeDriver")
       maybeDriver
     }).value.transact(xa)
-  }
 
-  override def findAll: DaoResp[Seq[DriverInfo]] = {
+  override def findAll: DaoResp[Seq[DriverInfo]] =
     (for {
-      all ← EitherT.right(sql"SELECT id, full_name, license_series, license_number FROM drivers"
-        .query[DriverInfo]
-        .to[List])
+      all ← EitherT.right(
+        sql"SELECT id, full_name, license_series, license_number FROM drivers"
+          .query[DriverInfo]
+          .to[List])
     } yield {
       logger.debug(s"Find all results: $all")
       all
     }).value.transact(xa)
-  }
 
-  override def createFine(fine: Fine): DaoResp[Fine] = {
+  override def createFine(fine: Fine): DaoResp[Fine] =
     (for {
-      _ ← EitherT.right(
-        sql"""INSERT INTO fines (id, driver_id, date_time, is_active)
-              VALUES (${ fine.id}, ${ fine.driverId}, ${fine.timestamp}, ${fine.isActive});"""
-          .update.run)
+      _ ← EitherT.right(sql"""INSERT INTO fines (id, driver_id, date_time, is_active)
+              VALUES (${fine.id}, ${fine.driverId}, ${fine.timestamp}, ${fine.isActive});""".update.run)
     } yield {
       logger.debug(s"$fine was saved to db")
       fine
     }).value.transact(xa)
-  }
 
   override def createFines(fines: Seq[Fine]): DaoResp[Seq[Fine]] = {
     // TODO: research if and how IO saves from stack overflow
-    def inner(acc: Seq[Fine], rem: Seq[Fine]): DaoResp[Seq[Fine]] = {
+    def inner(acc: Seq[Fine], rem: Seq[Fine]): DaoResp[Seq[Fine]] =
       rem.headOption
         .fold[DaoResp[Seq[Fine]]] {
           IO(Right[DaoError, Seq[Fine]](acc))
-        } { f ⇒ {
+        } { f ⇒
+          {
             val saveResult = createFine(f).unsafeRunSync()
             saveResult.fold(e ⇒ IO(Left(e)), _ ⇒ inner(acc :+ f, rem.tail))
           }
         }
-    }
 
     inner(Seq.empty, fines)
   }
 
-  override def findFine(id: Long): DaoResp[Option[Fine]] = {
+  override def findFine(id: Long): DaoResp[Option[Fine]] =
     (for {
       maybeDriver ← EitherT.right(
         sql"SELECT id, driver_id, date_time, is_active FROM fines WHERE id = $id"
@@ -170,9 +174,8 @@ class PostgresDao(dbUri: String, user: String, password: String)
       logger.debug(s"Find by id=$id: $maybeDriver")
       maybeDriver
     }).value.transact(xa)
-  }
 
-  override def findAllDriverFines(driverId: Long): DaoResp[Seq[Fine]] = {
+  override def findAllDriverFines(driverId: Long): DaoResp[Seq[Fine]] =
     (for {
       all ← EitherT.right(
         sql"SELECT id, driver_id, date_time, is_active FROM fines WHERE driver_id = $driverId"
@@ -182,9 +185,8 @@ class PostgresDao(dbUri: String, user: String, password: String)
       logger.debug(s"Find driver $driverId fines results: $all")
       all
     }).value.transact(xa)
-  }
 
-  override def findUnpaidDriverFines(driverId: Long): DaoResp[Seq[Fine]] = {
+  override def findUnpaidDriverFines(driverId: Long): DaoResp[Seq[Fine]] =
     (for {
       all ← EitherT.right(
         sql"""SELECT id, driver_id, date_time, is_active FROM fines
@@ -195,34 +197,28 @@ class PostgresDao(dbUri: String, user: String, password: String)
       logger.debug(s"Find driver $driverId fines results: $all")
       all
     }).value.transact(xa)
-  }
 
   override def setFinesPaid(fineIds: Seq[Long]): DaoResp[Int] = {
-    def setFinePaid(id: Long): DaoResp[Long] = {
+    def setFinePaid(id: Long): DaoResp[Long] =
       (for {
-        _ ← EitherT.right(sql"UPDATE fines SET is_active = FALSE WHERE id = $id;"
-          .update
-          .run)
+        _ ← EitherT.right(sql"UPDATE fines SET is_active = FALSE WHERE id = $id;".update.run)
       } yield {
         id
       }).value.transact(xa)
-    }
 
-    def inner(acc: Int, rem: Seq[Long]): DaoResp[Int] = {
+    def inner(acc: Int, rem: Seq[Long]): DaoResp[Int] =
       rem.headOption.fold[DaoResp[Int]] {
         IO.pure(Right(acc))
       } { id ⇒
-        setFinePaid(id).unsafeRunSync()
-          .fold(
-            e ⇒ IO(Left(e)),
-            _ ⇒ inner(acc + 1, rem.tail))
+        setFinePaid(id)
+          .unsafeRunSync()
+          .fold(e ⇒ IO(Left(e)), _ ⇒ inner(acc + 1, rem.tail))
       }
-    }
 
     inner(0, fineIds)
   }
 
-  override def deleteUserData(userId: Long): DaoResp[Unit] = {
+  override def deleteUserData(userId: Long): DaoResp[Unit] =
     (for {
       _ ← EitherT.right[DaoError](sql"DELETE FROM fines WHERE driver_id = $userId;".update.run)
       _ ← EitherT.right[DaoError](sql"DELETE FROM drivers WHERE id = $userId;".update.run)
@@ -231,7 +227,6 @@ class PostgresDao(dbUri: String, user: String, password: String)
       logger.debug(s"User $userId info was removed from db")
       ()
     }).value.transact(xa)
-  }
 }
 
 object PostgresDao {

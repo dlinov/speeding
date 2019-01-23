@@ -16,7 +16,7 @@ object ResponseParser {
 
   private val dtFormat = DateTimeFormatter.ofPattern("dd.MM.yyyy H:mm:ss")
 
-  def parse(driverId: Long, resp: String): Either[ParsingError, Seq[Fine]] = {
+  def parse(driverId: Long, resp: String): Either[ParsingError, Seq[Fine]] =
     if (resp.startsWith("<html>")) {
       Left(err("Whole page response", resp))
     } else {
@@ -52,7 +52,6 @@ object ResponseParser {
         Left(err("Unexpected response", resp))
       }
     }
-  }
 
   private def err(msg: String, resp: String): ParsingError = {
     val errId = UUID.randomUUID()
@@ -61,8 +60,7 @@ object ResponseParser {
   }
 
   implicit class ResponseTimeConverter(val input: String) extends AnyVal {
-    def asTimestamp: Instant = {
+    def asTimestamp: Instant =
       ZonedDateTime.of(LocalDateTime.from(dtFormat.parse(input)), Constants.TZ).toInstant
-    }
   }
 }

@@ -9,10 +9,10 @@ import io.github.dlinov.speeding.model.service.Errors.{GenericServiceError, NotF
 trait UserService {
   def dao: Dao
 
-  def findUser(userId: Long): IO[ServiceResp[BotUser]] = {
-    dao.findUser(userId)
-      .map(_
-        .leftMap(err ⇒ GenericServiceError(err.message))
-        .flatMap(_.toRight(NotFound)))
-  }
+  def findUser(userId: Long): IO[ServiceResp[BotUser]] =
+    dao
+      .findUser(userId)
+      .map(
+        _.leftMap(err ⇒ GenericServiceError(err.message))
+          .flatMap(_.toRight(NotFound)))
 }

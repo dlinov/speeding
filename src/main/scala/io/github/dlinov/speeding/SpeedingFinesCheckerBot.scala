@@ -27,19 +27,25 @@ import scalaj.http._
 import scala.concurrent.Future
 import scala.util.Try
 
-class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
-                             (implicit backend: SttpBackend[Future, Nothing])
-  extends TelegramBot with Commands with Polling with Callbacks with DaoProvider with Localized with LocalizedHelp {
+class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)(
+    implicit backend: SttpBackend[Future, Nothing])
+    extends TelegramBot
+    with Commands
+    with Polling
+    with Callbacks
+    with DaoProvider
+    with Localized
+    with LocalizedHelp {
 
   import SpeedingFinesCheckerBot._
   override val client: RequestHandler = new SttpClient(token)
 
   type EitherS[A] = Either[String, A]
   type IOEitherS[A] = IO[EitherS[A]]
-  implicit val applicative: Applicative[IOEitherS] = Applicative[IO] compose Applicative[EitherS]
+  implicit val applicative: Applicative[IOEitherS] = Applicative[IO].compose(Applicative[EitherS])
 
-  private val ioEitherFunctor = Functor[IO] compose Functor[dao.DaoEither]
-  private val ioEitherListFunctor = ioEitherFunctor compose Functor[List]
+  private val ioEitherFunctor = Functor[IO].compose(Functor[dao.DaoEither])
+  private val ioEitherListFunctor = ioEitherFunctor.compose(Functor[List])
 
   onCommandWithHelp("forcecheck")("bot.description.forcecheck") { implicit msg ⇒
     skipBots {
@@ -62,7 +68,8 @@ class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
               messages.format("errors.chatNotFound")
             } {
               performCheckForSingleDriver(chatId, _)
-            })
+            }
+          )
         reply(botResponse)
       }).unsafeRunSync()
     }
@@ -92,15 +99,17 @@ class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
                 "\uD83C\uDDE7\uD83C\uDDFE" → "by",
                 "\uD83C\uDDF7\uD83C\uDDFA" → "ru",
                 "\uD83C\uDDEC\uD83C\uDDE7" → "en")
-              val inlineBtns = InlineKeyboardMarkup(Seq(
-                supportedLanguages
-                  .map(lang ⇒ InlineKeyboardButton(lang._1, callbackData = Some(lang._2)))))
+              val inlineBtns = InlineKeyboardMarkup(Seq(supportedLanguages
+                .map(lang ⇒ InlineKeyboardButton(lang._1, callbackData = Some(lang._2)))))
               val currentLanguage = supportedLanguages
                 .find(_._2 == u.lang)
                 .map(_._1)
                 .getOrElse(userLocale.getLanguage)
-              reply(text = messages.format("lang.current", currentLanguage)(u.locale), replyMarkup = Some(inlineBtns))
-            })
+              reply(
+                text = messages.format("lang.current", currentLanguage)(u.locale),
+                replyMarkup = Some(inlineBtns))
+            }
+          )
       }).unsafeRunSync()
     }
   }
@@ -147,7 +156,8 @@ class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
               logger.error(s"Couldn't clear user $chatId data [$errorId]: ${err.message}")
               messages.format("errors.internal", errorId)
             },
-            _ ⇒ messages.format("data.removed"))
+            _ ⇒ messages.format("data.removed")
+          )
         reply(botResponse)
       }).unsafeRunSync()
     }
@@ -167,22 +177,26 @@ class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
                   fullName = s"$lastName $firstName $middleName",
                   licenseSeries = licenseSeries,
                   licenseNumber = licenseNumber)
-                dao.updateDriver(chatId, driverInfo).map(_.fold(
-                  err ⇒ {
-                    val errorId = UUID.randomUUID()
-                    logger.warn(s"Couldn't update data for $chatId [$errorId]: ${err.message}")
-                    messages.format("errors.save.internal", errorId) → None
-                  },
-                  _ ⇒ {
-                    logger.info(s"Chat $chatId updated its data to $driverInfo")
-                    val checkFinesResp = performCheckForSingleDriver(chatId, driverInfo)
-                    messages.format("data.saved") → Some(checkFinesResp)
-                  }))
+                dao
+                  .updateDriver(chatId, driverInfo)
+                  .map(_.fold(
+                    err ⇒ {
+                      val errorId = UUID.randomUUID()
+                      logger.warn(s"Couldn't update data for $chatId [$errorId]: ${err.message}")
+                      messages.format("errors.save.internal", errorId) → None
+                    },
+                    _ ⇒ {
+                      logger.info(s"Chat $chatId updated its data to $driverInfo")
+                      val checkFinesResp = performCheckForSingleDriver(chatId, driverInfo)
+                      messages.format("data.saved") → Some(checkFinesResp)
+                    }
+                  ))
               case _ ⇒
                 logger.warn(s"'$msgText' from $chatId didn't match input regex")
                 IO.pure(messages.format("errors.save.badrequest") → None)
             }
-          }.unsafeRunSync()
+          }
+          .unsafeRunSync()
         reply(saveUserResp)
         maybeCheckFinesResp.foreach(reply(_))
       }
@@ -190,28 +204,30 @@ class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
   }
 
   /*_*/
-  def performCheckForAllDrivers(): Unit = {
+  def performCheckForAllDrivers(): Unit =
     Try(retrieveCookies)
       .map { cookies ⇒
         val allDrivers = ioEitherFunctor.map(dao.findAll)(_.toList)
         val value = ioEitherListFunctor.map(allDrivers) { driver ⇒
           val userId = driver.id
-          dao.findUser(userId).map { _
-            .leftMap(err ⇒ s"Cannot query user $userId, but driver info exists: ${err.message}")
-            .flatMap(_.toRight(s"User $userId was not found, but driver info exists"))
-            .map { user ⇒
-              checkDriverFines(cookies, driver, onlyNew = true)(user.locale)
-                .map(sendMessageTo(userId, _))
-            }.void
+          dao.findUser(userId).map {
+            _.leftMap(err ⇒ s"Cannot query user $userId, but driver info exists: ${err.message}")
+              .flatMap(_.toRight(s"User $userId was not found, but driver info exists"))
+              .map { user ⇒
+                checkDriverFines(cookies, driver, onlyNew = true)(user.locale)
+                  .map(sendMessageTo(userId, _))
+              }
+              .void
           }
         }
-        value.flatMap(_.leftMap(_.message).flatTraverse(_.traverse[IOEitherS, Unit](identity)))
+        value
+          .flatMap(_.leftMap(_.message).flatTraverse(_.traverse[IOEitherS, Unit](identity)))
           .unsafeRunSync()
       }
-  }
   /*_*/
 
-  def performCheckForSingleDriver(chatId: Long, driverInfo: DriverInfo)(implicit locale: Locale): String = {
+  def performCheckForSingleDriver(chatId: Long, driverInfo: DriverInfo)(
+      implicit locale: Locale): String =
     Try(retrieveCookies)
       .fold(
         err ⇒ {
@@ -230,16 +246,14 @@ class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
             }
         }
       )
-  }
 
-  private def sendMessageTo(chatId: Long, text: String): Future[Message] = {
+  private def sendMessageTo(chatId: Long, text: String): Future[Message] =
     request(SendMessage(chatId, text))
-  }
 
   private def checkDriverFines(
-                                cookies: IndexedSeq[HttpCookie],
-                                driverInfo: DriverInfo,
-                                onlyNew: Boolean)(implicit locale: Locale): Option[String] = {
+      cookies: IndexedSeq[HttpCookie],
+      driverInfo: DriverInfo,
+      onlyNew: Boolean)(implicit locale: Locale): Option[String] =
     // TODO: wrap everything to IO?
     (for {
       resp ← Try(speedingReq(driverInfo, cookies).asString).toEither
@@ -252,28 +266,24 @@ class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
       _ ← dao.setFinesPaid(paidFines.map(_.id)).unsafeRunSync()
       _ ← dao.createFines(newFines).unsafeRunSync()
     } yield {
-      val paidPart = paidFines
-        .headOption
+      val paidPart = paidFines.headOption
         .map { _ ⇒
           val paid = paidFines.map(_.toHumanString).mkString("\n", "\n", "\n")
           messages.format("fines.paid") + paid
         }
       val fs = if (onlyNew) newFines else activeFines
-      val activePart = fs
-        .headOption
+      val activePart = fs.headOption
         .map { _ ⇒
           val active = fs.map(_.toHumanString).mkString("\n", "\n", "\n")
           messages.format("fines.unpaid") + active
         }
       paidPart |+| activePart
     }).toOption.flatten
-  }
 
-  private def retrieveCookies: IndexedSeq[HttpCookie] = {
+  private def retrieveCookies: IndexedSeq[HttpCookie] =
     SessionCookieReq.asString.cookies
-  }
 
-  private def skipBots(action: ⇒ Unit)(implicit msg: Message): Unit = {
+  private def skipBots(action: ⇒ Unit)(implicit msg: Message): Unit =
     msg.from.foreach(user ⇒ {
       if (!user.isBot) {
         action
@@ -281,7 +291,6 @@ class SpeedingFinesCheckerBot(val token: String, override val dao: Dao)
         logger.info(s"User ${getUserId(user)} is bot, skipping his request")
       }
     })
-  }
 
 }
 

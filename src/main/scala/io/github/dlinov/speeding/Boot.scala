@@ -7,6 +7,7 @@ import com.softwaremill.sttp.SttpBackend
 import com.softwaremill.sttp.okhttp.OkHttpFutureBackend
 import com.typesafe.config.ConfigFactory
 import io.github.dlinov.speeding.dao.PostgresDao
+import monix.execution.Scheduler
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.Future
@@ -17,13 +18,14 @@ import scala.util.Try
 object Boot extends IOApp {
   private final val correctJdbcPrefix = "jdbc:postgresql://"
 
-  def run(args: List[String]): IO[ExitCode] = {
+  def run(args: List[String]): IO[ExitCode] =
     for {
       logger ← IO(LoggerFactory.getLogger(this.getClass))
       config ← IO(ConfigFactory.load())
       // Fetch the token from an environment variable or untracked file.
-      token ← IO(Try(config.getString("bot.token"))
-        .getOrElse(Source.fromFile("bot.token").getLines().mkString))
+      token ← IO(
+        Try(config.getString("bot.token"))
+          .getOrElse(Source.fromFile("bot.token").getLines().mkString))
       interval ← IO(Duration.fromNanos(config.getDuration("bot.interval").toNanos))
       dao ← IO {
         val dbUri = new URI(config.getString("db.postgres.url"))
@@ -41,15 +43,15 @@ object Boot extends IOApp {
       }
       _ ← IO.fromFuture(IO(bot.run()))
       _ ← IO(logger.info("Bot has been started"))
-      // private val botScheduler = bot.system.scheduler
-      // private implicit val botExecutionContext: ExecutionContext = bot.executionContext
-      // botScheduler.schedule(5.seconds, 1.minute, () ⇒ logger.debug(memoryInfo))
-      // botScheduler.schedule(10.seconds, interval, () ⇒ bot.performCheckForAllDrivers())
-      never ← IO.never.map(_ ⇒ ExitCode.Success)
+      botScheduler ← IO(Scheduler.io("fines-check-scheduler"))
+      checkFinesTask ← IO {
+        botScheduler.scheduleAtFixedRate(10.seconds, interval)(bot.performCheckForAllDrivers())
+      }
+      never ← IO.never.map { _ ⇒
+        checkFinesTask.cancel()
+        ExitCode.Success
+      }
     } yield never
-
-  }
-
   /*private def memoryInfo: String = {
     val rt = Runtime.getRuntime
     val mb = 1 << 20

@@ -12,6 +12,7 @@ libraryDependencies ++= Seq(
   "com.bot4s" %% "telegram-core" % "4.0.0-RC2",
   "org.tpolecat" %% "doobie-core" % "0.6.0",
   "org.tpolecat" %% "doobie-postgres" % "0.6.0",
+  "io.monix" %% "monix-execution" % "3.0.0-RC2",
   "org.scalaj" %% "scalaj-http" % "2.4.1",
   "org.scala-lang.modules" %% "scala-xml" % "1.1.0",
   "org.apache.commons" % "commons-text" % "1.4",
@@ -21,17 +22,21 @@ libraryDependencies ++= Seq(
   "org.scalatest" %% "scalatest" % "3.0.5" % Test)
 
 scalacOptions ++= Seq(
-  "-unchecked",
   "-deprecation",
   "-encoding", "UTF-8",
   "-explaintypes",
   "-feature",
-  "-language:postfixOps",
   "-language:higherKinds",
+  "-unchecked",
+  "-Xcheckinit",
+  "-Xfuture",
   "-Xlint",
   "-Yno-adapted-args",
-  "-Ypartial-unification", // advised by https://github.com/typelevel/cats
+  "-Ypartial-unification",
+  "-Yrangepos",
   "-Ywarn-dead-code",
-  "-Ywarn-unused")
+  "-Ywarn-infer-any",
+  "-Ywarn-nullary-override",
+  "-Ywarn-unused-import")
 
 dockerBaseImage := "openjdk:11-jre-slim"
