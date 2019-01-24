@@ -4,7 +4,7 @@ import cats.data.EitherT
 import cats.effect._
 import doobie._
 import doobie.implicits._
-import io.github.dlinov.speeding.dao.Dao.DaoError
+import io.github.dlinov.speeding.dao.Dao.{DaoError, GenericDaoError}
 import io.github.dlinov.speeding.model.{BotUser, DriverInfo, Fine}
 import org.slf4j.LoggerFactory
 
@@ -113,19 +113,19 @@ class PostgresDao(dbUri: String, user: String, password: String)(implicit cs: Co
           .query[DriverInfo]
           .option)
     } yield {
-      logger.debug(s"Find by id=$id: $maybeDriver")
+      logger.debug(s"Find driver by id=$id: $maybeDriver")
       maybeDriver
     }).value.transact(xa)
 
   override def findUser(id: Long): DaoResp[Option[BotUser]] =
     (for {
-      maybeDriver ← EitherT.right(
+      maybeUser ← EitherT.right(
         sql"SELECT id, lang FROM bot_users WHERE id = $id"
           .query[BotUser]
           .option)
     } yield {
-      logger.debug(s"Find by id=$id: $maybeDriver")
-      maybeDriver
+      logger.trace(s"Find user by id=$id: $maybeUser")
+      maybeUser
     }).value.transact(xa)
 
   override def findAll: DaoResp[Seq[DriverInfo]] =
@@ -166,13 +166,13 @@ class PostgresDao(dbUri: String, user: String, password: String)(implicit cs: Co
 
   override def findFine(id: Long): DaoResp[Option[Fine]] =
     (for {
-      maybeDriver ← EitherT.right(
+      maybeFine ← EitherT.right(
         sql"SELECT id, driver_id, date_time, is_active FROM fines WHERE id = $id"
           .query[Fine]
           .option)
     } yield {
-      logger.debug(s"Find by id=$id: $maybeDriver")
-      maybeDriver
+      logger.debug(s"Find fine by id=$id: $maybeFine")
+      maybeFine
     }).value.transact(xa)
 
   override def findAllDriverFines(driverId: Long): DaoResp[Seq[Fine]] =
@@ -182,7 +182,10 @@ class PostgresDao(dbUri: String, user: String, password: String)(implicit cs: Co
           .query[Fine]
           .to[List])
     } yield {
-      logger.debug(s"Find driver $driverId fines results: $all")
+      all.foreach { fine ⇒
+        logger.info(
+          s"Fine (active=${fine.isActive}) was found for driver $driverId: ${fine.toHumanString}")
+      }
       all
     }).value.transact(xa)
 
@@ -194,7 +197,10 @@ class PostgresDao(dbUri: String, user: String, password: String)(implicit cs: Co
           .query[Fine]
           .to[List])
     } yield {
-      logger.debug(s"Find driver $driverId fines results: $all")
+      all.foreach { fine ⇒
+        logger.info(
+          s"Fine (active=${fine.isActive}) was found for driver $driverId: ${fine.toHumanString}")
+      }
       all
     }).value.transact(xa)
 
@@ -220,13 +226,18 @@ class PostgresDao(dbUri: String, user: String, password: String)(implicit cs: Co
 
   override def deleteUserData(userId: Long): DaoResp[Unit] =
     (for {
-      _ ← EitherT.right[DaoError](sql"DELETE FROM fines WHERE driver_id = $userId;".update.run)
-      _ ← EitherT.right[DaoError](sql"DELETE FROM drivers WHERE id = $userId;".update.run)
-      _ ← EitherT.right[DaoError](sql"DELETE FROM bot_users WHERE id = $userId;".update.run)
+      _ ← EitherT(sql"DELETE FROM fines WHERE driver_id = $userId;".update.run.attemptSql)
+      _ ← EitherT(sql"DELETE FROM drivers WHERE id = $userId;".update.run.attemptSql)
+      _ ← EitherT(sql"DELETE FROM bot_users WHERE id = $userId;".update.run.attemptSql)
     } yield {
       logger.debug(s"User $userId info was removed from db")
       ()
-    }).value.transact(xa)
+    }).leftMap { exc ⇒
+        logger.warn(s"Failed to clean data for user $userId", exc)
+        new GenericDaoError(exc.getMessage)
+      }
+      .value
+      .transact(xa)
 }
 
 object PostgresDao {

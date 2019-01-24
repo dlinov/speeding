@@ -37,9 +37,10 @@ object Boot extends IOApp {
         new PostgresDao(dbUrl, user, password)
       }
       _ ← dao.createSchemaIfMissing()
+      tessDataPath ← IO(config.getString("tesseract.datapath"))
       bot ← IO {
         implicit val backend: SttpBackend[Future, Nothing] = OkHttpFutureBackend()
-        new SpeedingFinesCheckerBot(token, dao)
+        new SpeedingFinesCheckerBot(token, dao, tessDataPath)
       }
       _ ← IO.fromFuture(IO(bot.run()))
       _ ← IO(logger.info("Bot has been started"))
