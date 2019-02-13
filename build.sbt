@@ -2,7 +2,7 @@ enablePlugins(DockerPlugin, JavaAppPackaging)
 
 name := "speeding"
 
-version := "0.6.1"
+version := "0.7.0"
 
 scalaVersion := "2.12.8"
 
@@ -51,6 +51,8 @@ assemblyMergeStrategy in assembly := {
   case PathList(ps @ _*) if ps.last endsWith ".html" ⇒ MergeStrategy.first
   case "application.conf"                            ⇒ MergeStrategy.concat
   case x if x endsWith ".txt"                        ⇒ MergeStrategy.discard
+  // reduce jar size by dropping tesseract windows dll
+  case x if x endsWith ".dll"                        ⇒ MergeStrategy.discard
   case x if x.contains("slf4j-api")                  ⇒ MergeStrategy.last
   case x if x.contains("log4j")                      ⇒ MergeStrategy.last
   case x if x.contains("org/apache/commons/logging") ⇒ MergeStrategy.last
