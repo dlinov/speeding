@@ -13,8 +13,8 @@ libraryDependencies ++= Seq(
   "org.tpolecat" %% "doobie-core" % "0.6.0",
   "org.tpolecat" %% "doobie-postgres" % "0.6.0",
   "io.monix" %% "monix-execution" % "3.0.0-RC2",
-  "org.scala-lang.modules" %% "scala-xml" % "1.1.0",
-  "org.apache.commons" % "commons-text" % "1.4",
+  "org.scala-lang.modules" %% "scala-xml" % "1.1.1",
+  "org.apache.commons" % "commons-text" % "1.6",
   "org.jmotor" %% "scala-i18n" % "1.0.6",
   "net.sourceforge.tess4j" % "tess4j" % "4.3.1",
 
