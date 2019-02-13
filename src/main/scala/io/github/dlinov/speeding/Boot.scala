@@ -50,6 +50,7 @@ object Boot extends IOApp {
       }
       never ← IO.never.map { _ ⇒
         checkFinesTask.cancel()
+        bot.shutdown()
         ExitCode.Success
       }
     } yield never
