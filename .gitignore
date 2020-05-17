@@ -3,4 +3,6 @@
 .bloop/
 .metals/
 bot.token
+captcha-solver/datasets
+project/metals.sbt
 target/
