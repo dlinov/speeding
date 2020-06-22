@@ -4,6 +4,7 @@ import java.nio.file.Path
 import java.time.Instant
 
 import cats.effect.{Blocker, ExitCode, IO, IOApp}
+import cats.syntax.functor._
 import fs2.io.{file => fs2File}
 import fs2.{Pipe, Stream}
 import io.circe.Json
@@ -12,14 +13,14 @@ import io.github.dlinov.speeding.captcha.ImageProcessor.{DigitsAndSign, RichImag
 import jawnfs2._
 import org.http4s._
 import org.http4s.client.blaze._
-import org.typelevel.jawn.Facade
+import org.typelevel.jawn.RawFacade
 
 import scala.concurrent.ExecutionContext.global
 import scala.concurrent.duration._
 
 object DatagenBoot extends IOApp with DatasetSettings with ImageProcessor {
 
-  private implicit val f: Facade[Json] = new CirceSupportParser(None, false).facade
+  private implicit val f: RawFacade[Json] = new CirceSupportParser(None).facade
   private val headers = Headers.of(
     Header("authority", "www.mvd.gov.by"),
     Header("pragma", "no-cache"),

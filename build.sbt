@@ -9,16 +9,19 @@ ThisBuild / scalacOptions ++= Seq(
   "-encoding", "UTF-8",
   "-explaintypes",
   "-feature",
-  "-language:postfixOps",
+  "-language:existentials",
   "-language:higherKinds",
+  "-language:postfixOps",
   "-unchecked",
   "-Xcheckinit",
   "-Xfuture",
   "-Xlint",
+  "-Ybackend-parallelism", "16",
   "-Yno-adapted-args",
   "-Ypartial-unification",
   "-Yrangepos",
   "-Ywarn-dead-code",
+  "-Ywarn-extra-implicit",
   "-Ywarn-infer-any",
   "-Ywarn-nullary-override",
   "-Ywarn-unused-import")
@@ -26,10 +29,11 @@ ThisBuild / name := "speeding"
 ThisBuild / version := "1.0.0-SNAPSHOT"
 
 val batikVersion = "1.12"
-val circeVersion = "0.13.0"
+val circeVersion = "0.11.2" // should match sttp from telegram-core
 val doobieVersion = "0.8.8"
+val flywayVersion = "6.4.2"
 val fs2Version = "2.3.0"
-val http4sVersion = "0.21.4"
+val http4sVersion = "0.20.23" // cannot use 0.21.4 because http4s-circe brings circe-jawn 0.13.0
 val logbackVersion = "1.2.3"
 val scrimageVersion = "4.0.4"
 val typesafeConfigVersion = "1.4.0"
@@ -39,20 +43,28 @@ val scalaXmlVersion = "1.3.0"
 val commonsTestVersion = "1.8"
 val scalaI18nVersion = "1.0.7"
 val tess4jVersion = "4.5.1"
-val sttpBackendVersion = "1.5.19" // should match with sttp from telegram-core
+val sttpBackendVersion = "1.5.19" // should match sttp from telegram-core
 val h2Version = "1.4.200"
-val scalatestVersion = "3.1.0"
+val scalatestVersion = "3.1.2"
+val scalacheckVersion = "1.14.3"
+val scalatestScalacheckVersion = "3.1.2.0"
+val kindProjectorVersion = "0.11.0"
+val betterMondaricForVersion = "0.3.1"
 
 lazy val bot = project.in(file("bot"))
   .dependsOn(`captcha-solver`)
   .enablePlugins(DockerPlugin, JavaAppPackaging)
   .settings(
     libraryDependencies ++= Seq(
+      compilerPlugin("org.typelevel" % "kind-projector" % kindProjectorVersion cross CrossVersion.full),
+      compilerPlugin("com.olegpy" %% "better-monadic-for" % betterMondaricForVersion),
       "ch.qos.logback" % "logback-classic" % logbackVersion,
       "com.typesafe" % "config" % typesafeConfigVersion,
       "com.bot4s" %% "telegram-core" % bot4sTelegramVersion,
       "org.tpolecat" %% "doobie-core" % doobieVersion,
       "org.tpolecat" %% "doobie-postgres" % doobieVersion,
+      "org.tpolecat" %% "doobie-hikari" % doobieVersion,
+      "org.flywaydb" % "flyway-core" % flywayVersion,
       "io.monix" %% "monix-execution" % monixVersion,
       "org.scala-lang.modules" %% "scala-xml" % scalaXmlVersion,
       "org.apache.commons" % "commons-text" % commonsTestVersion,
@@ -60,8 +72,10 @@ lazy val bot = project.in(file("bot"))
       "net.sourceforge.tess4j" % "tess4j" % tess4jVersion,
       "com.softwaremill.sttp" %% "async-http-client-backend-cats" % sttpBackendVersion,
 
-      "com.h2database" % "h2" % h2Version % Test,
-      "org.scalatest" %% "scalatest" % scalatestVersion % Test),
+      "com.h2database" % "h2" % h2Version/* % Test*/,
+      "org.scalatest" %% "scalatest" % scalatestVersion % Test,
+      "org.scalacheck" %% "scalacheck" % scalacheckVersion % Test,
+      "org.scalatestplus" %% "scalacheck-1-14" % scalatestScalacheckVersion % Test),
     libraryDependencies --= Seq(
       "log4j" % "log4j" % "1.2.17",
       "org.slf4j" % "log4j-over-slf4j" % "1.7.25"

@@ -15,14 +15,16 @@ trait LocalizedHelp[F[_]] { self: Commands[F] with Localized[F] ⇒
       variants: Seq[String],
       description: String,
       category: Option[String] = None,
-      helpHandler: Option[Action[F, Message]] = None)
+      helpHandler: Option[Action[F, Message]] = None
+  )
 
   private val commandsDescription = ArrayBuffer[CommandDescription]()
 
   def onCommandWithHelp(filters: String*)(
       description: String,
       category: Option[String] = None,
-      helpHandler: Option[Action[F, Message]] = None)(action: Action[F, Message]): Unit = {
+      helpHandler: Option[Action[F, Message]] = None
+  )(action: Action[F, Message]): Unit = {
     val filter = HintedCommandFilterMagnet(filters: _*)
     onCommand(filter)(action)
     commandsDescription += CommandDescription(filters, description, category, helpHandler)
@@ -52,14 +54,14 @@ trait LocalizedHelp[F[_]] { self: Commands[F] with Localized[F] ⇒
     allCommands
   }
 
-  def help(implicit msg: Message, locale: Locale): Unit =
+  def help(implicit msg: Message, locale: Locale): F[Message] =
     replyMd(
       helpHeader() + "\n" +
         helpBody() + "\n" +
         helpFooter() + "\n"
     )
 
-  def helpHelp(implicit msg: Message, locale: Locale): Unit =
+  def helpHelp(implicit msg: Message, locale: Locale): F[Message] =
     replyMd(messages.format("help.help"))
 
   def sync: Sync[F]
@@ -67,16 +69,20 @@ trait LocalizedHelp[F[_]] { self: Commands[F] with Localized[F] ⇒
   // TODO: call getUserLocale only once
   onCommandWithHelp("help")(
     "help.description",
-    helpHandler = Some(msg ⇒ sync.map(getUserLocale(msg))(locale => helpHelp(msg, locale)))) { implicit msg =>
+    helpHandler =
+      Some(msg ⇒ sync.flatMap(getUserLocale(msg))(locale => sync.void(helpHelp(msg, locale))))
+  ) { implicit msg =>
     sync.flatMap(getUserLocale) { implicit locale =>
       withArgs {
-        case Seq() => sync.delay(help(msg, locale))
+        case Seq() => sync.void(help(msg, locale))
         case Seq(command) =>
           val target = command.stripPrefix("/").toLowerCase()
           val cmdOpt = commandsDescription.find(_.variants.contains(target))
           cmdOpt match {
-            case Some(cmd) => cmd.helpHandler.map(_(msg)).getOrElse(sync.unit)
-            case _ => sync.map(replyMd(s"${messages.format("help.unknown")} /$target"))(_ => ()) // TODO: find better way ignore return value
+            case Some(cmd) =>
+              cmd.helpHandler.map(_(msg)).getOrElse(sync.unit)
+            case _ =>
+              sync.void(replyMd(s"${messages.format("help.unknown")} /$target"))
           }
       }
     }

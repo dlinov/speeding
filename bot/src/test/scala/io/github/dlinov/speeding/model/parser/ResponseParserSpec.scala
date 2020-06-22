@@ -4,11 +4,13 @@ import java.nio.charset.StandardCharsets
 import java.time.ZonedDateTime
 
 import io.github.dlinov.speeding.model.{Constants, Fine}
-import org.scalatest.{EitherValues, MustMatchers, WordSpec}
+import org.scalatest.EitherValues
+import org.scalatest.matchers.must.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
 import scala.io.Source
 
-class ResponseParserSpec extends WordSpec with MustMatchers with EitherValues {
+class ResponseParserSpec extends AnyWordSpec with Matchers with EitherValues {
 
   private val driverId = 9876
 

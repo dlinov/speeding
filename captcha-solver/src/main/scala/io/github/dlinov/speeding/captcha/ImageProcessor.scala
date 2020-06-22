@@ -24,7 +24,7 @@ object ImageProcessor {
   private val transcoder = new PNGTranscoder()
   private val filters = Seq(
     new GrayscaleFilter,
-    new BlackThresholdFilter(99),
+    new BlackThresholdFilter(99)
   )
 
 }

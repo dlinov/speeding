@@ -15,5 +15,6 @@ trait UserService {
       .findUser(userId)
       .map(
         _.leftMap(err ⇒ GenericServiceError(err.message))
-          .flatMap(_.toRight(NotFound)))
+          .flatMap(_.toRight(NotFound))
+      )
 }

@@ -7,11 +7,12 @@ trait HintedCommandFilterMagnet extends CommandFilterMagnet {
 }
 
 object HintedCommandFilterMagnet {
-  def apply(cmds: String*): HintedCommandFilterMagnet = new HintedCommandFilterMagnet {
-    override def targets: Set[String] = cmds.toSet
+  def apply(cmds: String*): HintedCommandFilterMagnet =
+    new HintedCommandFilterMagnet {
+      override def targets: Set[String] = cmds.toSet
 
-    override def accept(c: Command): Boolean = targets.exists(_.equalsIgnoreCase(c.cmd))
-  }
+      override def accept(c: Command): Boolean = targets.exists(_.equalsIgnoreCase(c.cmd))
+    }
 
   val ANY: HintedCommandFilterMagnet = new HintedCommandFilterMagnet {
     override def targets: Set[String] = Set.empty
@@ -19,10 +20,11 @@ object HintedCommandFilterMagnet {
   }
 
   implicit class HintedCommandFilterOps(s: String) {
-    def asHCFM: HintedCommandFilterMagnet = HintedCommandFilterMagnet {
-      val target = s.trim().stripPrefix("/")
-      require(target.matches("""\w+"""))
-      target
-    }
+    def asHCFM: HintedCommandFilterMagnet =
+      HintedCommandFilterMagnet {
+        val target = s.trim().stripPrefix("/")
+        require(target.matches("""\w+"""))
+        target
+      }
   }
 }

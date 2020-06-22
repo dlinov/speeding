@@ -11,7 +11,7 @@ object SimpleSolver {
   private val signs = List('+', '-')
 
   private object Solver {
-    val BlackARGB = 0xFF000000
+    val BlackARGB = 0xff000000
 
     def create(masksPath: Path) = new Solver(masksPath)
   }
@@ -49,18 +49,27 @@ object SimpleSolver {
 
     private def predict(image: ImmutableImage, masks: Seq[Mask]): Char = {
       val probabilities = calculateProbabilities(image, masks)
-      logger.info(probabilities.map(p => f"${p._1}: ${p._2 * 100}%.2f%%").mkString("Probabilities: ", ", ", ""))
+      logger.info(
+        probabilities
+          .map(p => f"${p._1}: ${p._2 * 100}%.2f%%")
+          .mkString("Probabilities: ", ", ", "")
+      )
       probabilities.maxBy(_._2)._1
     }
 
-    private def calculateProbabilities(image: ImmutableImage, masks: Seq[Mask]): Seq[(Char, Float)] = {
+    private def calculateProbabilities(
+        image: ImmutableImage,
+        masks: Seq[Mask]
+    ): Seq[(Char, Float)] = {
       val pixels = image.pixels()
       masks
-        .map { case (ch, maskPixels) =>
-          val valuablePixels = pixels.zip(maskPixels)
-            .filter(px => px._2.argb == Solver.BlackARGB) // only black pixels from mask
-          val diff = valuablePixels.count { case (px1, px2) => px1.argb != px2.argb }
-          ch -> (1f - (diff.toFloat / valuablePixels.length))
+        .map {
+          case (ch, maskPixels) =>
+            val valuablePixels = pixels
+              .zip(maskPixels)
+              .filter(px => px._2.argb == Solver.BlackARGB) // only black pixels from mask
+            val diff = valuablePixels.count { case (px1, px2) => px1.argb != px2.argb }
+            ch -> (1f - (diff.toFloat / valuablePixels.length))
         }
     }
   }

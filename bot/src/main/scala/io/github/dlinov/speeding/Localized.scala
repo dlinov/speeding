@@ -17,7 +17,14 @@ trait Localized[F[_]] { self: DaoProvider[F] ⇒
       .flatMap(_.languageCode)
       .flatMap(_.split("-").headOption.map(new Locale(_)))
       .getOrElse(Localized.DefaultLocale)
-    fnctr.map(dao.findUser(msg.source))(_.toOption.flatMap(_.map(_.locale)).getOrElse(tgLang))
+    fnctr.map {
+      val x = dao.findUser(msg.source)
+      x
+    } {
+      _.toOption
+        .flatMap(_.map(_.locale))
+        .getOrElse(tgLang)
+    }
   }
 }
 
